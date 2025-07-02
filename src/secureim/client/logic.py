@@ -1,5 +1,5 @@
 import os
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from .networking import Networking
 from .utils import crypto, steganography
 
@@ -34,6 +34,7 @@ class ClientLogic(QObject):
         self._p2p_addresses = {} # friend_username -> (ip, port)
         self._friends_data = {}  # friend_username -> friend_data_dict
         self._pending_messages = {} # friend_username -> [payload, ...]
+        self._p2p_handshake_timers = {} # friend_username -> QTimer
 
         self.network = Networking(SERVER_HOST, SERVER_PORT, P2P_PORT)
         self.network.server_message_received_signal.connect(self.handle_server_message)
@@ -80,16 +81,40 @@ class ClientLogic(QObject):
         payload = data.get("payload", {})
         sender = payload.get("from")
 
-        if sender and self._chat_modes.get(sender) != 'p2p':
-            print(f"P2P connection established with {sender} at {addr}")
-            self._chat_modes[sender] = 'p2p'
-            self._p2p_addresses[sender] = addr
-            self.p2p_status_updated_signal.emit(sender, 'p2p')
+        if msg_type == "p2p_handshake":
+            step = payload.get("step")
+            if step == "offer":
+                print(f"收到了来自 {sender} 的P2P连接请求")
+                response = {"type": "p2p_handshake", "payload": {"from": self._username, "step": "ack"}}
+                self.network.send_request(response, is_p2p=True, recipient_addr=addr)
+            
+            elif step == "ack":
+                print(f"收到了来自 {sender} 的P2P连接确认")
+                if sender in self._p2p_handshake_timers:
+                    self._p2p_handshake_timers[sender].stop()
+                    del self._p2p_handshake_timers[sender]
+                
+                self._chat_modes[sender] = 'p2p'
+                self._p2p_addresses[sender] = addr
+                self.p2p_status_updated_signal.emit(sender, 'p2p')
+                
+                response = {"type": "p2p_handshake", "payload": {"from": self._username, "step": "confirm"}}
+                self.network.send_request(response, is_p2p=True, recipient_addr=addr)
+                self.initiate_key_exchange(sender)
 
-        if msg_type == "receive_message":
-            self._handle_receive_message(payload)
-        elif msg_type == "receive_session_key":
-            self._handle_receive_session_key(payload)
+            elif step == "confirm":
+                print(f"与 {sender} 的P2P连接已最终确认")
+                self._chat_modes[sender] = 'p2p'
+                self._p2p_addresses[sender] = addr
+                self.p2p_status_updated_signal.emit(sender, 'p2p')
+        
+        elif self._chat_modes.get(sender) == 'p2p':
+            if msg_type == "receive_message":
+                self._handle_receive_message(payload)
+            elif msg_type == "receive_session_key":
+                self._handle_receive_session_key(payload)
+        else:
+            print(f"忽略了来自 {sender} 的非P2P模式下的消息，类型为'{msg_type}'")
 
     # --- Specific Message Handlers ---
 
@@ -205,6 +230,15 @@ class ClientLogic(QObject):
             self._p2p_addresses[username] = (ip, port)
             print(f"Received P2P offer from {username} at {ip}:{port}")
 
+    def _p2p_handshake_timeout(self, friend_username):
+        print(f"与 {friend_username} 的P2P连接请求超时。")
+        if friend_username in self._p2p_handshake_timers:
+            self._p2p_handshake_timers[friend_username].stop()
+            del self._p2p_handshake_timers[friend_username]
+        
+        self._chat_modes[friend_username] = 'cs'
+        self.p2p_status_updated_signal.emit(friend_username, 'p2p_fail')
+
     # --- User-Triggered Actions ---
 
     def register(self, username, password, email):
@@ -270,34 +304,54 @@ class ClientLogic(QObject):
 
     def _send_payload(self, recipient, payload):
         mode = self._chat_modes.get(recipient, 'cs')
-        base_payload = {"from": self._username, **payload}
+        payload['from'] = self._username
+        
+        request_type = "receive_message" # This is the type for the final recipient
         
         if mode == 'p2p':
-            request = {"type": "receive_message", "payload": base_payload}
-            self.network.send_request(request, is_p2p=True, recipient_addr=self._p2p_addresses.get(recipient))
+            # In P2P mode, send directly
+            addr = self._p2p_addresses.get(recipient)
+            if addr:
+                request = {"type": request_type, "payload": payload}
+                self.network.send_request(request, is_p2p=True, recipient_addr=addr)
+            else:
+                print(f"无法在P2P模式下发送给 {recipient}，缺少地址。")
         else:
-            request = {"type": "relay_message", "payload": {"to": recipient, **payload}}
+            # In C/S mode, relay through server
+            payload['to'] = recipient
+            request = {"type": "relay_message", "payload": payload}
             self.network.send_request(request)
 
     def set_mode_for_friend(self, friend_username, mode):
-        current_mode = self._chat_modes.get(friend_username, 'cs')
-        if mode == current_mode: return
+        if self._chat_modes.get(friend_username) == mode and mode == 'p2p':
+            print("已经处于P2P模式。")
+            return
         
-        if mode == 'p2p':
-            self._chat_modes[friend_username] = 'p2p'
-            self.network.send_request({
-                "type": "request_p2p_connection",
-                "payload": {"to": friend_username}
-            })
-            # The rest of the logic flows from the server's p2p_connection_info response
-        else: # switch back to 'cs'
+        if mode == 'cs':
             self._chat_modes[friend_username] = 'cs'
             self.p2p_status_updated_signal.emit(friend_username, 'cs')
+            return
+
+        if self._p2p_handshake_timers.get(friend_username):
+            print(f"与 {friend_username} 的P2P握手已在进行中。")
+            return
+
+        friend_data = self._friends_data.get(friend_username)
+        if not friend_data or friend_data.get('status') != 'online' or not friend_data.get('ip'):
+            print(f"无法向 {friend_username} 发起P2P连接：用户离线或地址未知。")
+            self.p2p_status_updated_signal.emit(friend_username, 'p2p_fail')
+            return
+
+        self.p2p_status_updated_signal.emit(friend_username, 'p2p_connecting')
         
-        # Immediately re-exchange keys over the new channel
-        if self._session_keys.get(friend_username):
-            print(f"Switching mode to {mode} for {friend_username}. Re-initiating key exchange.")
-            self.initiate_key_exchange(friend_username)
+        request = {"type": "p2p_handshake", "payload": {"from": self._username, "step": "offer"}}
+        self.network.send_request(request, is_p2p=True, recipient_addr=(friend_data["ip"], P2P_PORT))
+
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: self._p2p_handshake_timeout(friend_username))
+        timer.start(5000)
+        self._p2p_handshake_timers[friend_username] = timer
 
     def request_friends(self):
         self.network.send_request({"type": "get_friends"})

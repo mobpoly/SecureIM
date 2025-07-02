@@ -67,6 +67,15 @@ class ChatWidget(QWidget):
         self.chat_display.append(html)
         self.chat_display.verticalScrollBar().setValue(self.chat_display.verticalScrollBar().maximum())
 
+    def append_system_message(self, message):
+        html = f'''
+            <div style="text-align: center; margin: 5px;">
+                <i style="color: #888;">{message}</i>
+            </div>
+        '''
+        self.chat_display.append(html)
+        self.chat_display.verticalScrollBar().setValue(self.chat_display.verticalScrollBar().maximum())
+
     def append_file_info(self, sender, filename, file_path=None, is_self=False):
         align_right = is_self
         bubble_color = "#dcf8c6" if align_right else "#ffffff"
@@ -244,66 +253,76 @@ class MainWindow(QMainWindow):
 
     def set_chat_mode(self, username, mode):
         self.friend_chat_modes[username] = mode
+        
+        item_to_update = None
         for i in range(self.friend_list_widget.count()):
             item = self.friend_list_widget.item(i)
             item_data = item.data(Qt.ItemDataRole.UserRole)
             if item_data and item_data.get("username") == username:
-                self._update_friend_item_icon(item)
+                item_to_update = item
                 break
+        
+        if item_to_update:
+            self._update_friend_item_icon(item_to_update)
+
+        # Generate the appropriate system message
+        message = ""
+        if mode == 'p2p':
+            message = "P2P 连接成功！现在是直连通信。"
+        elif mode == 'p2p_fail':
+            message = "P2P 连接失败。将切换回服务器中继模式。"
+        elif mode == 'p2p_connecting':
+            message = "正在尝试建立 P2P 连接..."
+        elif mode == 'cs':
+            message = "已切换到 C/S (服务器中继) 模式。"
+        
+        # Add the message to the correct user's chat window
+        if message:
+            chat_widget = self.chat_widgets.get(username)
+            if chat_widget:
+                chat_widget.append_system_message(message)
 
     def _update_friend_item_icon(self, item):
         friend_data = item.data(Qt.ItemDataRole.UserRole)
         username = friend_data.get("username")
-        status = friend_data.get("status")
-        is_online = status == 'online'
-        mode = self.friend_chat_modes.get(username, 'cs')
+        status = friend_data.get("status", "offline")
+        chat_mode = self.friend_chat_modes.get(username, 'cs')
+
+        online_color = "#2ecc71" if status == "online" else "#95a5a6"
+        p2p_color = None
+
+        if status == "online":
+            if chat_mode == 'p2p':
+                p2p_color = "#3498db"
+            elif chat_mode == 'p2p_connecting':
+                p2p_color = "#f1c40f"
         
-        online_color = '#2ecc71' if is_online else '#95a5a6' # Green / Gray
-        p2p_color = '#3498db' if mode == 'p2p' and is_online else None # Blue
-        
-        icon = self._create_status_icon(online_color, p2p_color)
-        item.setIcon(icon)
+        item.setIcon(self._create_status_icon(online_color, p2p_color))
 
     def add_message_to_chat(self, sender, message, is_self=False):
-        partner = sender if not is_self else self.chat_stack.currentWidget().partner_name
-        if partner not in self.chat_widgets:
-            self._create_chat_widget(partner)
-        display_sender = "我" if is_self else sender
-        self.chat_widgets[partner].append_message(display_sender, message, is_self=is_self)
+        partner = self._get_current_partner_name()
+        if not partner: return
 
+        # Determine the target chat widget.
+        target_username = partner if is_self else sender
+        
+        chat_widget = self.chat_widgets.get(target_username)
+        if chat_widget:
+             chat_widget.append_message(sender, message, is_self=is_self)
+    
     def add_stego_image_to_chat(self, sender, image_bytes, hidden_text, is_self=False):
-        partner = sender if not is_self else self.chat_stack.currentWidget().partner_name
-        if partner not in self.chat_widgets:
-            self._create_chat_widget(partner)
-        display_sender = "我" if is_self else sender
-        self.chat_widgets[partner].append_image(display_sender, image_bytes, hidden_text, is_self=is_self)
-            
+        partner = sender if not is_self else self._get_current_partner_name()
+        if partner in self.chat_widgets:
+            self.chat_widgets[partner].append_image(sender, image_bytes, hidden_text, is_self=is_self)
+    
     def add_file_to_chat(self, sender, filename, file_bytes=None, is_self=False):
-        partner = sender if not is_self else self.chat_stack.currentWidget().partner_name
+        partner = sender if not is_self else self._get_current_partner_name()
         if partner not in self.chat_widgets:
             self._create_chat_widget(partner)
-        
-        display_sender = "我" if is_self else sender
-        save_path = None
-        
-        if file_bytes:
-            try:
-                os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-                base, ext = os.path.splitext(filename)
-                save_path = os.path.join(DOWNLOAD_DIR, filename)
-                counter = 1
-                while os.path.exists(save_path):
-                    save_path = os.path.join(DOWNLOAD_DIR, f"{base}_{counter}{ext}")
-                    counter += 1
-                with open(save_path, 'wb') as f:
-                    f.write(file_bytes)
-                self.chat_widgets[partner].append_message("系统", f"收到文件 {filename}，已保存至 {DOWNLOAD_DIR}", is_self=False)
-            except Exception as e:
-                err_msg = f"保存文件时出错: {e}"
-                self.chat_widgets[partner].append_message("系统", err_msg, is_self=False)
-        
-        self.chat_widgets[partner].append_file_info(display_sender, filename, save_path, is_self=is_self)
 
+        chat_widget = self.chat_widgets.get(partner)
+        if chat_widget:
+            chat_widget.append_file_info(sender, filename, file_path=self._save_received_file(filename, file_bytes), is_self=is_self)
 
     def _on_add_friend(self):
         text, ok = QInputDialog.getText(self, '添加好友', '输入用户名:')
