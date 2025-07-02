@@ -121,6 +121,14 @@ class ClientLogic(QObject):
         if friend_username and public_key_pem:
             aes_key = crypto.generate_aes_key()
             self._session_keys[friend_username] = aes_key
+
+            print(f"---BEGIN {friend_username} PUBLIC KEY---")
+            print(public_key_pem)
+            print(f"---END {friend_username} PUBLIC KEY---")
+            print(f"---BEGIN GENERATED SESSION KEY for {friend_username}---")
+            print(aes_key.hex())
+            print(f"---END GENERATED SESSION KEY for {friend_username}---")
+
             encrypted_key = crypto.encrypt_with_public_key(public_key_pem, aes_key)
             
             mode = self._chat_modes.get(friend_username, 'cs')
@@ -139,6 +147,9 @@ class ClientLogic(QObject):
             aes_key = crypto.decrypt_with_private_key(encrypted_key_b64)
             if aes_key:
                 self._session_keys[sender] = aes_key
+                print(f"---BEGIN RECEIVED SESSION KEY from {sender}---")
+                print(aes_key.hex())
+                print(f"---END RECEIVED SESSION KEY from {sender}---")
                 print(f"Secure session established with {sender}.")
                 if sender in self._pending_messages:
                     for cached_payload in self._pending_messages.pop(sender):
