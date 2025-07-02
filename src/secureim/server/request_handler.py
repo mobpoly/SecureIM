@@ -44,8 +44,7 @@ def handle_register(payload, send_func):
         return None
     # --- 验证结束 ---
 
-    success = database.add_user(username, password, email, public_key)
-    message = "注册成功" if success else "用户名已存在。"
+    success, message = database.add_user(username, password, email, public_key)
     status = "success" if success else "error"
     response = {"type": "response", "action": "register", "status": status, "message": message}
     send_func(response)

@@ -25,7 +25,7 @@ def create_tables():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            email TEXT,
+            email TEXT UNIQUE NOT NULL,
             public_key TEXT NOT NULL
         );
     ''')
@@ -50,9 +50,13 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def add_user(username, password, email, public_key):
-    """向数据库中添加一个新用户。"""
-    if not username or not password or not public_key:
-        return False
+    """
+    向数据库中添加一个新用户。
+    返回一个元组 (bool, str)，表示成功状态和消息。
+    """
+    if not all([username, password, email, public_key]):
+        return False, "所有字段均为必填项。"
+        
     conn = get_db_connection()
     cursor = conn.cursor()
     password_hash = hash_password(password)
@@ -62,9 +66,15 @@ def add_user(username, password, email, public_key):
             (username, password_hash, email, public_key)
         )
         conn.commit()
-        return True
-    except sqlite3.IntegrityError: # 用户名已存在
-        return False
+        return True, "注册成功"
+    except sqlite3.IntegrityError as e:
+        error_message = str(e).lower()
+        if 'unique constraint failed: users.username' in error_message:
+            return False, "该用户名已被使用。"
+        elif 'unique constraint failed: users.email' in error_message:
+            return False, "该邮箱已被注册。"
+        else:
+            return False, "发生未知数据库错误。"
     finally:
         conn.close()
 
