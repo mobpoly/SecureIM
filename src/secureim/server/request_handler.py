@@ -6,6 +6,7 @@ from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+
 from . import database
 from .state import online_users, verification_codes
 
@@ -179,11 +180,7 @@ def broadcast_status_update(username, status, send_func_for_user):
 
     message = {"type": "friend_status_update", "payload": payload}
 
-    for friend in friends:
-        friend_socket = online_users.get_socket(friend)
-        if friend_socket:
-            # send_to_specific_client(friend_socket, message)
-            pass # 实际逻辑在 connection_handler 中
+    return message
 
 
 def handle_request_verification_code(payload, send_func):

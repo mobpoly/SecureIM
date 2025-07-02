@@ -34,15 +34,19 @@ class MainController:
         self.logic.generic_response_signal.connect(self.display_generic_response)
         self.logic.p2p_status_updated_signal.connect(self.update_chat_mode_indicator)
         self.logic.friend_removed_signal.connect(lambda: self.logic.request_friends())
+        # 在 _connect_logic_signals 方法中增加：
         self.logic.verification_code_sent_signal.connect(self.on_verification_code_sent)
         self.logic.user_info_received_signal.connect(self.handle_user_info)
         self.logic.starred_friends_changed.connect(self._handle_starred_friends)
+        self.logic.logout_success_signal.connect(self.on_logout_success)
         self.logic.session_terminated_signal.connect(self.on_session_terminated)
+
 
     def _connect_login_window_signals(self):
         self.login_window.login_requested.connect(self.logic.login)
         self.login_window.register_requested.connect(self.logic.register)
         self.login_window.verification_code_requested.connect(self.logic.request_verification_code)
+
 
     def _connect_main_window_signals(self):
         if self.main_window:
@@ -54,7 +58,22 @@ class MainController:
             self.main_window.mode_change_requested.connect(self.logic.set_mode_for_friend)
             self.main_window.refresh_requested.connect(self.logic.request_friends)
             self.main_window.delete_friend_requested.connect(self.logic.delete_friend)
-            self.main_window.logout_requested.connect(self.on_logout_requested)
+            self.main_window.logout_requested.connect(self.logic.logout)
+
+    def on_logout_success(self):
+        """处理退出登录成功"""
+        if self.main_window:
+            self.main_window.close()
+            self.main_window = None
+
+        # 重新显示登录窗口
+        self.login_window = LoginWindow()
+        self._connect_login_window_signals()
+        self.login_window.show()
+
+        # 重置用户信息
+        self.user_email = ""
+        self.user_ip = ""
 
     def on_login_success(self):
         current_username = self.login_window.login_username_input.text()
@@ -74,21 +93,6 @@ class MainController:
         self.main_window.show()
         
         QTimer.singleShot(500, self.logic.request_friends)
-
-    def on_logout_requested(self):
-        """处理退出登录请求。"""
-        # 优先处理逻辑层登出
-        self.logic.logout()
-
-        # 关闭主窗口
-        if self.main_window:
-            self.main_window.close()
-            self.main_window = None
-
-        # 重置并显示登录窗口
-        self.login_window = LoginWindow()
-        self._connect_login_window_signals()
-        self.login_window.show()
 
     def on_connection_failed(self):
         active_window = self.main_window if self.main_window and self.main_window.isVisible() else self.login_window
@@ -150,10 +154,8 @@ class MainController:
 
     def _handle_starred_friends(self, data):
         if self.main_window:
-            # The UI component handles the starring logic internally now
-            # This signal is just to keep the server in sync, which is already done
-            # by the logic layer. We can simplify the UI update.
-            self.main_window.update_friend_list(list(self.logic._friends_data.values()))
+            # 更新UI
+            self.main_window.update_friend_list(list(self.logic._friends_data.values()))#--------+++++++++++++++？？？？？
 
     def on_session_terminated(self, username, message):
         if self.main_window:
@@ -163,12 +165,12 @@ class MainController:
         """处理用户在UI上选择好友的事件。"""
         # 1. 触发密钥交换（如果需要）
         self.logic.initiate_key_exchange(username)
-        
+
         # 2. 确保聊天输入框状态正确
         if self.main_window:
             friend_data = self.logic._friends_data.get(username, {})
             is_online = friend_data.get("status") == "online"
-            
+
             chat_widget = self.main_window.chat_widgets.get(username)
             if chat_widget:
                 chat_widget.set_input_enabled(is_online)
