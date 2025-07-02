@@ -27,6 +27,7 @@ class ClientLogic(QObject):
     incoming_file_signal = pyqtSignal(dict)
     
     p2p_status_updated_signal = pyqtSignal(str, str)
+    session_terminated_signal = pyqtSignal(str, str) # 重新添加会话终止信号
 
     user_info_received_signal = pyqtSignal(dict)  # 新增信号：用户信息接收
     starred_friends_changed = pyqtSignal(dict)  # 新增信号：特别关注好友变化
@@ -71,12 +72,7 @@ class ClientLogic(QObject):
         elif msg_type == "receive_message":
             self._handle_receive_message(payload)
         elif msg_type == "friend_status_update":
-            username = payload.get("username")
-            if username in self._friends_data:
-                self._friends_data[username].update(payload)
-            else:
-                self._friends_data[username] = payload
-            self.friend_status_updated_signal.emit(payload)
+            self._handle_friend_status_update(payload)
         elif msg_type == "p2p_connection_info":
             self._handle_p2p_info(payload)
         elif msg_type == "p2p_connection_offer":
@@ -281,6 +277,37 @@ class ClientLogic(QObject):
         self._chat_modes[friend_username] = 'cs'
         self.p2p_status_updated_signal.emit(friend_username, 'p2p_fail')
 
+    def _handle_friend_status_update(self, payload):
+        username = payload.get("username")
+        status = payload.get("status")
+
+        if not username:
+            return
+
+        # Update friend data cache
+        if username in self._friends_data:
+            self._friends_data[username].update(payload)
+        else:
+            self._friends_data[username] = payload
+        
+        # Notify UI to update friend list (e.g., icon color)
+        self.friend_status_updated_signal.emit(payload)
+
+        # --- SESSION MANAGEMENT LOGIC ---
+        if status == "offline":
+            # 1. If in P2P mode, switch back to C/S
+            if self._chat_modes.get(username) == 'p2p':
+                self._chat_modes[username] = 'cs'
+                print(f"Switched back to C/S mode for {username} as they went offline.")
+                self.p2p_status_updated_signal.emit(username, 'cs')
+            
+            # 2. Terminate session if it exists
+            if username in self._session_keys:
+                del self._session_keys[username]
+                print(f"Session with {username} terminated as they went offline.")
+                message = "对方已下线，会话已结束。重新上线后需要再次协商密钥。"
+                self.session_terminated_signal.emit(username, message)
+
     # --- User-Triggered Actions ---
 
     # 修改现有的 register 方法：
@@ -417,7 +444,7 @@ class ClientLogic(QObject):
     def disconnect(self):
         self.network.disconnect()
 
-        # 在类的末尾增加新方法：
+    # 在类的末尾增加新方法：
 
     def request_verification_code(self, email):
         """请求邮箱验证码"""

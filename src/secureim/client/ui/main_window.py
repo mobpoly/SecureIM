@@ -47,6 +47,18 @@ class ChatWidget(QWidget):
         
         self.setLayout(layout)
 
+    def set_input_enabled(self, enabled):
+        """启用或禁用聊天输入控件。"""
+        self.message_input.setEnabled(enabled)
+        self.send_button.setEnabled(enabled)
+        self.send_image_button.setEnabled(enabled)
+        self.send_file_button.setEnabled(enabled)
+        
+        if not enabled:
+            self.message_input.setPlaceholderText("好友已离线，无法发送消息。")
+        else:
+            self.message_input.setPlaceholderText("输入消息...")
+
     def append_message(self, sender, message, is_self=False):
         align_right = is_self
         bubble_color = "#dcf8c6" if align_right else "#ffffff"
@@ -126,6 +138,12 @@ class ChatWidget(QWidget):
             self.chat_display.verticalScrollBar().setValue(self.chat_display.verticalScrollBar().maximum())
         except Exception as e:
             self.append_message("系统", f"显示图片时出错: {e}")
+
+    def add_system_message(self, username, message):
+        """向指定用户的聊天窗口添加一条系统消息。"""
+        chat_widget = self.chat_widgets.get(username)
+        if chat_widget:
+            chat_widget.append_system_message(message)
 
 
 class MainWindow(QMainWindow):
@@ -276,6 +294,13 @@ class MainWindow(QMainWindow):
                 item_data.update(friend_update_data)
                 item.setData(Qt.ItemDataRole.UserRole, item_data)
                 self._update_friend_item_display(item)
+
+                # If this friend's chat is currently open, update its input state
+                current_chat_widget = self._get_current_chat_widget()
+                if current_chat_widget and current_chat_widget.partner_name == username:
+                    is_online = friend_update_data.get("status") == "online"
+                    current_chat_widget.set_input_enabled(is_online)
+
                 break
 
     def set_chat_mode(self, username, mode):
@@ -466,6 +491,12 @@ class MainWindow(QMainWindow):
     def show_generic_response(self, title, message):
         QMessageBox.information(self, title, message)
 
+    def add_system_message(self, username, message):
+        """向指定用户的聊天窗口添加一条系统消息。"""
+        chat_widget = self.chat_widgets.get(username)
+        if chat_widget:
+            chat_widget.append_system_message(message)
+
     def _show_settings(self):
         settings_window = SettingsWindow(self.username, self.email, self.ip)
         settings_window.show()
@@ -538,6 +569,12 @@ class MainWindow(QMainWindow):
 
         # 发射信号通知其他组件
         self.starred_friends_changed.emit({"username": username, "starred": username in self.starred_friends})
+
+    def _get_current_chat_widget(self):
+        current_widget = self.chat_stack.currentWidget()
+        if isinstance(current_widget, ChatWidget):
+            return current_widget
+        return None
 
 class SettingsWindow(QWidget):
     def __init__(self, username, email, ip, parent=None):
