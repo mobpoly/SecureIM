@@ -81,6 +81,9 @@ def handle_client_connection(client_socket, address):
                     to_user = payload.get('to')
                     target_socket = online_users.get_socket(to_user)
                     if target_socket:
+                        log_msg_type = "会话密钥" if msg_type == "relay_session_key" else "消息"
+                        print(f"[C/S 中继] 正在从中继 '{current_user}' 到 '{to_user}' 的{log_msg_type}。")
+                        
                         relay_payload = {"from": current_user, **payload}
                         del relay_payload['to']
                         relay_type = "receive_message" if msg_type == "relay_message" else "receive_session_key"
