@@ -73,15 +73,6 @@ SecureIM/
 git clone https://github.com/mobpoly/SecureIM
 ```
 
-建议创建并激活一个虚拟环境：
-```bash
-python -m venv venv
-# Windows
-venv\\Scripts\\activate
-# Linux/macOS
-source venv/bin/activate
-```
-
 安装所需的依赖项：
 ```bash
 pip install -r requirements.txt
