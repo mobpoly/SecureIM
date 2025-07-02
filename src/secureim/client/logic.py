@@ -447,6 +447,19 @@ class ClientLogic(QObject):
     # 在类的末尾增加新方法：
 
     def request_verification_code(self, email):
-        """请求邮箱验证码"""
+        """请求发送验证码到指定邮箱。"""
         request = {"type": "request_verification_code", "payload": {"email": email}}
         self.network.send_request(request)
+
+    def logout(self):
+        """处理用户登出。"""
+        if self._username:
+            self.network.logout(self._username)
+        self.disconnect()
+        # Reset client state
+        self._username = None
+        self._session_keys = {}
+        self._chat_modes = {}
+        self._p2p_addresses = {}
+        self._friends_data = {}
+        print("已登出并重置客户端状态。")

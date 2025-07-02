@@ -54,6 +54,7 @@ class MainController:
             self.main_window.mode_change_requested.connect(self.logic.set_mode_for_friend)
             self.main_window.refresh_requested.connect(self.logic.request_friends)
             self.main_window.delete_friend_requested.connect(self.logic.delete_friend)
+            self.main_window.logout_requested.connect(self.on_logout_requested)
 
     def on_login_success(self):
         current_username = self.login_window.login_username_input.text()
@@ -73,6 +74,21 @@ class MainController:
         self.main_window.show()
         
         QTimer.singleShot(500, self.logic.request_friends)
+
+    def on_logout_requested(self):
+        """处理退出登录请求。"""
+        # 优先处理逻辑层登出
+        self.logic.logout()
+
+        # 关闭主窗口
+        if self.main_window:
+            self.main_window.close()
+            self.main_window = None
+
+        # 重置并显示登录窗口
+        self.login_window = LoginWindow()
+        self._connect_login_window_signals()
+        self.login_window.show()
 
     def on_connection_failed(self):
         active_window = self.main_window if self.main_window and self.main_window.isVisible() else self.login_window

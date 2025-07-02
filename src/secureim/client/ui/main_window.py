@@ -81,7 +81,7 @@ class ChatWidget(QWidget):
 
     def append_system_message(self, message):
         html = f'''
-            <div style="text-align: center; margin: 5px;">
+            <div style="text-align: left; margin: 5px;">
                 <i style="color: #888;">{message}</i>
             </div>
         '''
@@ -156,6 +156,7 @@ class MainWindow(QMainWindow):
     delete_friend_requested = pyqtSignal(str)
     refresh_requested = pyqtSignal()
     starred_friends_changed = pyqtSignal(dict)
+    logout_requested = pyqtSignal()
 
     def __init__(self, username, email, ip, parent=None):
         super().__init__(parent)
@@ -201,6 +202,11 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
         settings_menu = menubar.addMenu("选项")
         settings_menu.addAction(self.settings_action)
+
+        # 添加退出登录操作
+        logout_action = QAction("退出登录", self)
+        logout_action.triggered.connect(self.logout_requested.emit)
+        settings_menu.addAction(logout_action)
 
         # 好友列表控件
 
