@@ -49,6 +49,9 @@ def handle_client_connection(client_socket, address):
                 if msg_type == "register":
                     handler.handle_register(payload, send_func)
 
+                elif msg_type == "request_verification_code":
+                    handler.handle_request_verification_code(payload, send_func)
+
                 elif msg_type == "login":
                     user = handler.handle_login(payload, send_func, client_socket, address)
                     if user:

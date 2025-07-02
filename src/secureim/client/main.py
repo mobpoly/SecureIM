@@ -11,7 +11,10 @@ class MainController:
         self.logic = ClientLogic()
         self.login_window = LoginWindow()
         self.main_window = None
-        
+
+        self.user_email = ""  # 存储用户邮箱
+        self.user_ip = ""  # 存储用户IP
+
         self._connect_logic_signals()
         self._connect_login_window_signals()
         
@@ -31,12 +34,19 @@ class MainController:
         self.logic.generic_response_signal.connect(self.display_generic_response)
         self.logic.p2p_status_updated_signal.connect(self.update_chat_mode_indicator)
         self.logic.friend_removed_signal.connect(lambda: self.logic.request_friends())
-        self.logic.session_terminated_signal.connect(self.on_session_terminated)
-        
+        # 在 _connect_logic_signals 方法中增加：
+        self.logic.verification_code_sent_signal.connect(self.on_verification_code_sent)
+        self.logic.user_info_received_signal.connect(self.handle_user_info)
+        self.logic.starred_friends_changed.connect(self._handle_starred_friends)  # 新增连接
+
+
     def _connect_login_window_signals(self):
         self.login_window.login_requested.connect(self.logic.login)
         self.login_window.register_requested.connect(self.logic.register)
-        
+        # 在 _connect_login_window_signals 方法中修改：
+        # 保持不变，但UI需要传递验证码
+        self.login_window.verification_code_requested.connect(self.logic.request_verification_code)  # 新增
+
     def _connect_main_window_signals(self):
         if self.main_window:
             self.main_window.message_sent.connect(self.logic.send_encrypted_message)
@@ -51,8 +61,17 @@ class MainController:
     def on_login_success(self):
         current_username = self.login_window.login_username_input.text()
         self.login_window.close()
-        
-        self.main_window = MainWindow(username=current_username)
+
+        # 获取用户信息
+        self.logic.request_user_info()
+
+        # 创建主窗口（稍后设置邮箱和IP）
+        self.main_window = MainWindow(
+            username=current_username,
+            email=self.user_email,
+            ip=self.user_ip
+        )
+
         self._connect_main_window_signals()
         self.main_window.show()
         
@@ -70,10 +89,6 @@ class MainController:
     def update_friend_status(self, status_update):
         if self.main_window:
             self.main_window.set_friend_status(status_update)
-
-    def on_session_terminated(self, username, message):
-        if self.main_window:
-            self.main_window.add_system_message(username, message)
 
     def update_chat_mode_indicator(self, username, mode):
         if self.main_window:
@@ -106,6 +121,26 @@ class MainController:
             self.main_window.show_generic_response(title, message)
             if response_data.get('action') in ['add_friend', 'delete_friend'] and response_data.get('status') == 'success':
                 self.logic.request_friends()
+
+    # 在类的末尾增加新方法：
+    def on_verification_code_sent(self, message):
+        if self.login_window:
+            self.login_window.show_verification_code_result(message)
+
+    def handle_user_info(self, user_info):
+        self.user_email = user_info.get("email", "")
+        self.user_ip = user_info.get("ip", "")
+
+        # 更新主窗口的用户信息
+        if self.main_window:
+            self.main_window.email = self.user_email
+            self.main_window.ip = self.user_ip
+
+    def _handle_starred_friends(self, data):
+        if self.main_window:
+            # 更新UI
+            self.main_window._toggle_star_friend(data["username"], data["starred"])
+
 
 def start_client():
     app = QApplication(sys.argv)

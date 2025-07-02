@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QListWidget, QListWidgetItem, QTextEdit, QPushButton, QSplitter,
     QStackedWidget, QLabel, QInputDialog, QFileDialog, QMessageBox,
-    QTextBrowser, QMenu, QStyle
+    QTextBrowser, QMenu, QStyle, QGroupBox, QFormLayout
 )
 from PyQt6.QtGui import QIcon, QPixmap, QImage, QColor, QPainter, QAction
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QUrl, QBuffer, QIODevice
@@ -46,18 +46,6 @@ class ChatWidget(QWidget):
         layout.addLayout(input_layout)
         
         self.setLayout(layout)
-
-    def set_input_enabled(self, enabled):
-        """启用或禁用聊天输入控件。"""
-        self.message_input.setEnabled(enabled)
-        self.send_button.setEnabled(enabled)
-        self.send_image_button.setEnabled(enabled)
-        self.send_file_button.setEnabled(enabled)
-        
-        if not enabled:
-            self.message_input.setPlaceholderText("好友已离线")
-        else:
-            self.message_input.setPlaceholderText("输入消息...")
 
     def append_message(self, sender, message, is_self=False):
         align_right = is_self
@@ -149,10 +137,14 @@ class MainWindow(QMainWindow):
     mode_change_requested = pyqtSignal(str, str)
     delete_friend_requested = pyqtSignal(str)
     refresh_requested = pyqtSignal()
+    starred_friends_changed = pyqtSignal(dict)
 
-    def __init__(self, username, parent=None):
+    def __init__(self, username, email, ip, parent=None):
         super().__init__(parent)
         self.username = username
+        self.email = email
+        self.ip = ip
+        self.starred_friends = set()  # 存储特别关注的好友
         self.setWindowTitle(f"安全IM - 已登录为 {username}")
         self.setGeometry(100, 100, 900, 700)
         self.chat_widgets = {}
@@ -171,16 +163,28 @@ class MainWindow(QMainWindow):
         header_widget = QWidget()
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(5,5,5,5)
+        # 好友列表标签
         header_label = QLabel("好友列表:")
+        header_layout.addWidget(header_label)
+        header_layout.addStretch()  # 添加弹性空间
         refresh_button = QPushButton()
         refresh_button.setToolTip("刷新好友列表")
         refresh_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserReload)
         refresh_button.setIcon(refresh_icon)
         refresh_button.setFixedSize(QSize(28,28))
         refresh_button.clicked.connect(lambda: self.refresh_requested.emit())
-        header_layout.addWidget(header_label)
-        header_layout.addStretch()
         header_layout.addWidget(refresh_button)
+
+        # 设置按钮 - 现在放在主窗口的菜单栏中
+        self.settings_action = QAction("设置", self)
+        self.settings_action.triggered.connect(self._show_settings)
+
+        # 创建菜单栏
+        menubar = self.menuBar()
+        settings_menu = menubar.addMenu("选项")
+        settings_menu.addAction(self.settings_action)
+
+        # 好友列表控件
 
         self.friend_list_widget = QListWidget()
         self.friend_list_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -205,6 +209,12 @@ class MainWindow(QMainWindow):
         splitter.addWidget(left_panel)
         splitter.addWidget(right_panel)
         splitter.setSizes([250, 650])
+
+        # 修改好友列表的点击事件
+        self.friend_list_widget.itemClicked.connect(self._on_friend_clicked)  # 新增点击事件处理
+
+        # 主布局
+
         main_layout.addWidget(splitter)
 
     def _create_status_icon(self, online_status_color, p2p_status_color=None):
@@ -249,6 +259,11 @@ class MainWindow(QMainWindow):
             self.friend_chat_modes.setdefault(username, 'cs')
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, friend_data)
+
+            # 设置特别关注好友的背景色
+            if username in self.starred_friends:
+                item.setBackground(QColor("#ffcccc"))  # 浅红色背景
+
             self.friend_list_widget.addItem(item)
             self._update_friend_item_display(item)
 
@@ -261,13 +276,6 @@ class MainWindow(QMainWindow):
                 item_data.update(friend_update_data)
                 item.setData(Qt.ItemDataRole.UserRole, item_data)
                 self._update_friend_item_display(item)
-                
-                # If this friend's chat is currently open, update its state
-                current_chat_widget = self._get_current_chat_widget()
-                if current_chat_widget and current_chat_widget.partner_name == username:
-                    is_online = friend_update_data.get("status") == "online"
-                    current_chat_widget.set_input_enabled(is_online)
-
                 break
 
     def set_chat_mode(self, username, mode):
@@ -306,7 +314,7 @@ class MainWindow(QMainWindow):
         username = friend_data.get("username")
         status = friend_data.get("status", "offline")
         chat_mode = self.friend_chat_modes.get(username, 'cs')
-        
+
         online_color = "#2ecc71" if status == "online" else "#95a5a6"
         p2p_color = None
 
@@ -328,17 +336,17 @@ class MainWindow(QMainWindow):
         chat_widget = self.chat_widgets.get(target_username)
         if chat_widget:
              chat_widget.append_message(sender, message, is_self=is_self)
-
+    
     def add_stego_image_to_chat(self, sender, image_bytes, hidden_text, is_self=False):
         partner = sender if not is_self else self._get_current_partner_name()
         if partner in self.chat_widgets:
             self.chat_widgets[partner].append_image(sender, image_bytes, hidden_text, is_self=is_self)
-            
+    
     def add_file_to_chat(self, sender, filename, file_bytes=None, is_self=False):
         partner = sender if not is_self else self._get_current_partner_name()
         if partner not in self.chat_widgets:
             self._create_chat_widget(partner)
-        
+
         chat_widget = self.chat_widgets.get(partner)
         if chat_widget:
             chat_widget.append_file_info(sender, filename, file_path=self._save_received_file(filename, file_bytes), is_self=is_self)
@@ -373,26 +381,24 @@ class MainWindow(QMainWindow):
 
     def _on_friend_selected(self, current_item, previous_item):
         if not current_item:
+            self.chat_stack.setCurrentIndex(0)
             return
-
-        partner_name = current_item.data(Qt.ItemDataRole.UserRole)['username']
+            
+        friend_data = current_item.data(Qt.ItemDataRole.UserRole)
+        if not friend_data: return
+            
+        current_username = friend_data.get("username")
         
-        if partner_name not in self.chat_widgets:
-            self._create_chat_widget(partner_name)
-        
-        self.chat_stack.setCurrentWidget(self.chat_widgets[partner_name])
-        
-        # 密钥交换请求
-        self.friend_selected.emit(partner_name)
-
-        # 根据好友在线状态启用/禁用输入
-        is_online = self._is_current_partner_online()
-        current_chat = self._get_current_chat_widget()
-        if current_chat:
-            current_chat.set_input_enabled(is_online)
+        if current_item and (not previous_item or current_item != previous_item):
+            self.friend_selected.emit(current_username)
+            
+        if current_username not in self.chat_widgets:
+            self._create_chat_widget(current_username)
+            
+        self.chat_stack.setCurrentWidget(self.chat_widgets[current_username])
 
     def _create_chat_widget(self, partner_name):
-        chat_widget = ChatWidget(partner_name=partner_name, parent=self)
+        chat_widget = ChatWidget(partner_name)
         self.chat_stack.addWidget(chat_widget)
         self.chat_widgets[partner_name] = chat_widget
         chat_widget.send_button.clicked.connect(self._on_send_message)
@@ -460,14 +466,114 @@ class MainWindow(QMainWindow):
     def show_generic_response(self, title, message):
         QMessageBox.information(self, title, message)
 
-    def add_system_message(self, username, message):
-        """向指定用户的聊天窗口添加一条系统消息。"""
-        chat_widget = self.chat_widgets.get(username)
-        if chat_widget:
-            chat_widget.append_system_message(message)
+    def _show_settings(self):
+        settings_window = SettingsWindow(self.username, self.email, self.ip)
+        settings_window.show()
 
-    def _get_current_chat_widget(self):
-        current_chat = self.chat_stack.currentWidget()
-        if isinstance(current_chat, ChatWidget):
-            return current_chat
-        return None 
+
+    def _on_friend_clicked(self, item):  # 修改为点击事件处理# 新增方法：处理好友点击事件
+        if not item:
+            return
+
+        friend_data = item.data(Qt.ItemDataRole.UserRole)
+        if not friend_data:
+            return
+
+        username = friend_data.get("username")
+        status = friend_data.get("status", "offline")
+
+        # 如果好友离线，直接进入聊天
+        if status != "online":
+            self._enter_chat(username)
+            return
+
+        # 在线好友显示菜单
+        menu = QMenu()
+
+        # 开始聊天
+        chat_action = QAction("开始聊天", self)
+        chat_action.triggered.connect(lambda: self._enter_chat(username))
+        menu.addAction(chat_action)
+
+        # 查看信息
+        info_action = QAction("查看信息", self)
+        info_action.triggered.connect(lambda: self._show_friend_info(friend_data))
+        menu.addAction(info_action)
+
+        # 设置/取消特别关注
+        star_text = "取消特别关注" if username in self.starred_friends else "设为特别关注"
+        star_action = QAction(star_text, self)
+        star_action.triggered.connect(lambda: self._toggle_star_friend(username))
+        menu.addAction(star_action)
+
+        # 显示菜单
+        pos = self.friend_list_widget.viewport().mapFromGlobal(self.cursor().pos())
+        menu.exec(self.friend_list_widget.viewport().mapToGlobal(pos))
+
+    def _enter_chat(self, username):
+        self.friend_selected.emit(username)
+        if username not in self.chat_widgets:
+            self._create_chat_widget(username)
+        self.chat_stack.setCurrentWidget(self.chat_widgets[username])
+
+    def _show_friend_info(self, friend_data):
+        username = friend_data.get("username")
+        ip = friend_data.get("ip", "未知")
+        port = friend_data.get("port", "未知")
+        status = "在线" if friend_data.get("status") == "online" else "离线"
+
+        info = f"用户名: {username}\nIP地址: {ip}\n端口: {port}\n状态: {status}"
+        QMessageBox.information(self, "好友信息", info)
+
+    def _toggle_star_friend(self, username):
+        if username in self.starred_friends:
+            self.starred_friends.remove(username)
+        else:
+            self.starred_friends.add(username)
+
+        # 更新UI
+        self.update_friend_list([item.data(Qt.ItemDataRole.UserRole)
+                                 for i in range(self.friend_list_widget.count())
+                                 for item in [self.friend_list_widget.item(i)]])
+
+        # 发射信号通知其他组件
+        self.starred_friends_changed.emit({"username": username, "starred": username in self.starred_friends})
+
+class SettingsWindow(QWidget):
+    def __init__(self, username, email, ip, parent=None):
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle("设置")
+        self.setGeometry(300, 300, 400, 300)
+
+        # 保持对窗口的引用，防止被垃圾回收
+        self._window = None
+
+        layout = QVBoxLayout()
+
+        # 账号信息
+        account_group = QGroupBox("账号信息")
+        account_layout = QFormLayout()
+        account_layout.addRow("用户名:", QLabel(username))
+        account_group.setLayout(account_layout)
+        layout.addWidget(account_group)
+
+        # 开发团队
+        team_group = QGroupBox("开发团队")
+        team_layout = QVBoxLayout()
+        team_layout.addWidget(QLabel("项目名称: 安全IM"))
+        team_layout.addWidget(QLabel("开发时间: 2025年7月1日"))
+        team_layout.addWidget(QLabel("团队成员: 杨正启, 米天鸿, 陈泽同，苏淇"))
+        team_group.setLayout(team_layout)
+        layout.addWidget(team_group)
+
+        # 关闭按钮
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(self.close)
+        layout.addWidget(close_button, alignment=Qt.AlignmentFlag.AlignRight)
+
+        self.setLayout(layout)
+
+    def show(self):
+        # 确保窗口不会被垃圾回收
+        self._window = self
+        super().show()

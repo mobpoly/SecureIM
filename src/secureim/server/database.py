@@ -56,7 +56,7 @@ def add_user(username, password, email, public_key):
     """
     if not all([username, password, email, public_key]):
         return False, "所有字段均为必填项。"
-        
+
     conn = get_db_connection()
     cursor = conn.cursor()
     password_hash = hash_password(password)
