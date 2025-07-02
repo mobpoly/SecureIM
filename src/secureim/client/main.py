@@ -31,6 +31,7 @@ class MainController:
         self.logic.generic_response_signal.connect(self.display_generic_response)
         self.logic.p2p_status_updated_signal.connect(self.update_chat_mode_indicator)
         self.logic.friend_removed_signal.connect(lambda: self.logic.request_friends())
+        self.logic.session_terminated_signal.connect(self.on_session_terminated)
         
     def _connect_login_window_signals(self):
         self.login_window.login_requested.connect(self.logic.login)
@@ -69,6 +70,10 @@ class MainController:
     def update_friend_status(self, status_update):
         if self.main_window:
             self.main_window.set_friend_status(status_update)
+
+    def on_session_terminated(self, username, message):
+        if self.main_window:
+            self.main_window.add_system_message(username, message)
 
     def update_chat_mode_indicator(self, username, mode):
         if self.main_window:

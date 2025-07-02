@@ -47,6 +47,18 @@ class ChatWidget(QWidget):
         
         self.setLayout(layout)
 
+    def set_input_enabled(self, enabled):
+        """启用或禁用聊天输入控件。"""
+        self.message_input.setEnabled(enabled)
+        self.send_button.setEnabled(enabled)
+        self.send_image_button.setEnabled(enabled)
+        self.send_file_button.setEnabled(enabled)
+        
+        if not enabled:
+            self.message_input.setPlaceholderText("好友已离线")
+        else:
+            self.message_input.setPlaceholderText("输入消息...")
+
     def append_message(self, sender, message, is_self=False):
         align_right = is_self
         bubble_color = "#dcf8c6" if align_right else "#ffffff"
@@ -249,6 +261,13 @@ class MainWindow(QMainWindow):
                 item_data.update(friend_update_data)
                 item.setData(Qt.ItemDataRole.UserRole, item_data)
                 self._update_friend_item_display(item)
+                
+                # If this friend's chat is currently open, update its state
+                current_chat_widget = self._get_current_chat_widget()
+                if current_chat_widget and current_chat_widget.partner_name == username:
+                    is_online = friend_update_data.get("status") == "online"
+                    current_chat_widget.set_input_enabled(is_online)
+
                 break
 
     def set_chat_mode(self, username, mode):
@@ -287,7 +306,7 @@ class MainWindow(QMainWindow):
         username = friend_data.get("username")
         status = friend_data.get("status", "offline")
         chat_mode = self.friend_chat_modes.get(username, 'cs')
-
+        
         online_color = "#2ecc71" if status == "online" else "#95a5a6"
         p2p_color = None
 
@@ -309,17 +328,17 @@ class MainWindow(QMainWindow):
         chat_widget = self.chat_widgets.get(target_username)
         if chat_widget:
              chat_widget.append_message(sender, message, is_self=is_self)
-    
+
     def add_stego_image_to_chat(self, sender, image_bytes, hidden_text, is_self=False):
         partner = sender if not is_self else self._get_current_partner_name()
         if partner in self.chat_widgets:
             self.chat_widgets[partner].append_image(sender, image_bytes, hidden_text, is_self=is_self)
-    
+            
     def add_file_to_chat(self, sender, filename, file_bytes=None, is_self=False):
         partner = sender if not is_self else self._get_current_partner_name()
         if partner not in self.chat_widgets:
             self._create_chat_widget(partner)
-
+        
         chat_widget = self.chat_widgets.get(partner)
         if chat_widget:
             chat_widget.append_file_info(sender, filename, file_path=self._save_received_file(filename, file_bytes), is_self=is_self)
@@ -354,24 +373,26 @@ class MainWindow(QMainWindow):
 
     def _on_friend_selected(self, current_item, previous_item):
         if not current_item:
-            self.chat_stack.setCurrentIndex(0)
             return
-            
-        friend_data = current_item.data(Qt.ItemDataRole.UserRole)
-        if not friend_data: return
-            
-        current_username = friend_data.get("username")
+
+        partner_name = current_item.data(Qt.ItemDataRole.UserRole)['username']
         
-        if current_item and (not previous_item or current_item != previous_item):
-            self.friend_selected.emit(current_username)
-            
-        if current_username not in self.chat_widgets:
-            self._create_chat_widget(current_username)
-            
-        self.chat_stack.setCurrentWidget(self.chat_widgets[current_username])
+        if partner_name not in self.chat_widgets:
+            self._create_chat_widget(partner_name)
+        
+        self.chat_stack.setCurrentWidget(self.chat_widgets[partner_name])
+        
+        # 密钥交换请求
+        self.friend_selected.emit(partner_name)
+
+        # 根据好友在线状态启用/禁用输入
+        is_online = self._is_current_partner_online()
+        current_chat = self._get_current_chat_widget()
+        if current_chat:
+            current_chat.set_input_enabled(is_online)
 
     def _create_chat_widget(self, partner_name):
-        chat_widget = ChatWidget(partner_name)
+        chat_widget = ChatWidget(partner_name=partner_name, parent=self)
         self.chat_stack.addWidget(chat_widget)
         self.chat_widgets[partner_name] = chat_widget
         chat_widget.send_button.clicked.connect(self._on_send_message)
@@ -437,4 +458,16 @@ class MainWindow(QMainWindow):
                 self.add_file_to_chat(self.username, filename, is_self=True)
 
     def show_generic_response(self, title, message):
-        QMessageBox.information(self, title, message) 
+        QMessageBox.information(self, title, message)
+
+    def add_system_message(self, username, message):
+        """向指定用户的聊天窗口添加一条系统消息。"""
+        chat_widget = self.chat_widgets.get(username)
+        if chat_widget:
+            chat_widget.append_system_message(message)
+
+    def _get_current_chat_widget(self):
+        current_chat = self.chat_stack.currentWidget()
+        if isinstance(current_chat, ChatWidget):
+            return current_chat
+        return None 
