@@ -3,7 +3,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from .networking import Networking
 from .utils import crypto, steganography
 
-SERVER_HOST = '10.21.236.83'
+SERVER_HOST = '127.0.0.1'
 SERVER_PORT = 12345
 P2P_PORT = 54321
 
