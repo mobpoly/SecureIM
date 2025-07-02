@@ -1,17 +1,23 @@
 import re
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLineEdit,
-    QPushButton, QMessageBox, QStackedWidget, QLabel
+    QPushButton, QMessageBox, QStackedWidget, QLabel, QHBoxLayout
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 
 class LoginWindow(QWidget):
     # 用于连接到主应用控制器的信号
     login_requested = pyqtSignal(str, str)
-    register_requested = pyqtSignal(str, str, str)
-
+    register_requested = pyqtSignal(str, str, str, str)  # 修改：增加verification_code参数
+    # 新增信号
+    verification_code_requested = pyqtSignal(str)  # 参数：email
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        # 新增：验证码相关状态
+        self.is_email_verified = False
+        self.verification_code = ""
+
         self.setWindowTitle("安全IM - 登录")
         self.setFixedSize(350, 250)
 
@@ -73,6 +79,17 @@ class LoginWindow(QWidget):
         form_layout.addRow(QLabel("密码:"), self.register_password_input)
         form_layout.addRow(QLabel("邮箱:"), self.register_email_input)
 
+        # 新增：验证码相关UI
+        verification_layout = QHBoxLayout()
+        self.verification_code_input = QLineEdit(self)
+        self.verification_code_input.setPlaceholderText("输入验证码")
+        self.get_code_button = QPushButton("获取验证码")
+        self.get_code_button.clicked.connect(self.on_get_verification_code)
+        verification_layout.addWidget(self.verification_code_input)
+        verification_layout.addWidget(self.get_code_button)
+
+        form_layout.addRow(QLabel("验证码:"), verification_layout)
+
         register_button = QPushButton("注册", self)
         register_button.clicked.connect(self.on_register)
         
@@ -97,6 +114,7 @@ class LoginWindow(QWidget):
         username = self.register_username_input.text().strip()
         password = self.register_password_input.text()
         email = self.register_email_input.text().strip()
+        verification_code = self.verification_code_input.text().strip()  # 新增
 
         # 客户端验证
         if not all([username, password, email]):
@@ -120,10 +138,52 @@ class LoginWindow(QWidget):
             self.show_error("密码必须包含字母和数字的组合。")
             return
 
-        self.register_requested.emit(username, password, email)
+        # 新增：验证码验证
+        if not verification_code:
+            self.show_error("请输入验证码。")
+            return
+
+        # 修改：发送信号时增加验证码参数
+        self.register_requested.emit(username, password, email, verification_code)
             
     def show_error(self, message):
         QMessageBox.warning(self, "错误", message)
 
     def show_info(self, message):
-        QMessageBox.information(self, "提示", message) 
+        QMessageBox.information(self, "提示", message)
+
+    def on_get_verification_code(self):
+        """获取验证码"""
+        email = self.register_email_input.text().strip()
+
+        # 邮箱格式验证
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+            self.show_error("请输入有效的邮箱地址。")
+            return
+
+        self.verification_code_requested.emit(email)
+
+        # 防止重复点击，设置60秒倒计时
+        self.get_code_button.setEnabled(False)
+        self.get_code_button.setText("已发送")
+
+        # 可选：添加倒计时逻辑
+        from PyQt6.QtCore import QTimer
+        self.timer = QTimer()
+        self.countdown = 60
+        self.timer.timeout.connect(self._update_countdown)
+        self.timer.start(1000)
+
+    def _update_countdown(self):
+        """倒计时更新"""
+        self.countdown -= 1
+        if self.countdown > 0:
+            self.get_code_button.setText(f"重新获取({self.countdown}s)")
+        else:
+            self.get_code_button.setText("获取验证码")
+            self.get_code_button.setEnabled(True)
+            self.timer.stop()
+
+    def show_verification_code_result(self, message):
+        """显示验证码发送结果"""
+        self.show_info(message)

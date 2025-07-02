@@ -3,7 +3,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from .networking import Networking
 from .utils import crypto, steganography
 
-SERVER_HOST = '127.0.0.1'
+SERVER_HOST = '10.21.236.83'
 SERVER_PORT = 12345
 P2P_PORT = 54321
 
@@ -14,6 +14,8 @@ class ClientLogic(QObject):
     registration_success_signal = pyqtSignal()
     registration_failed_signal = pyqtSignal(str)
     connection_failed_signal = pyqtSignal()
+    # 在 ClientLogic 类的信号定义部分增加：
+    verification_code_sent_signal = pyqtSignal(str)  # 验证码发送结果消息
     
     generic_response_signal = pyqtSignal(dict)
     online_friends_updated_signal = pyqtSignal(list)
@@ -25,7 +27,9 @@ class ClientLogic(QObject):
     incoming_file_signal = pyqtSignal(dict)
     
     p2p_status_updated_signal = pyqtSignal(str, str)
-    session_terminated_signal = pyqtSignal(str, str)
+
+    user_info_received_signal = pyqtSignal(dict)  # 新增信号：用户信息接收
+    starred_friends_changed = pyqtSignal(dict)  # 新增信号：特别关注好友变化
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -41,7 +45,12 @@ class ClientLogic(QObject):
         self.network.server_message_received_signal.connect(self.handle_server_message)
         self.network.p2p_message_received_signal.connect(self.handle_p2p_message)
         self.network.connection_failed_signal.connect(self.connection_failed_signal.emit)
-        
+
+        self._user_email = ""
+        self._user_ip = ""
+        # 连接特别关注信号
+        self.starred_friends_changed.connect(self._handle_starred_friends_change)  # 新增连接
+
         if self.network.connect_to_server():
             self.network.setup_p2p_listener()
 
@@ -62,13 +71,46 @@ class ClientLogic(QObject):
         elif msg_type == "receive_message":
             self._handle_receive_message(payload)
         elif msg_type == "friend_status_update":
-            self._handle_friend_status_update(payload)
+            username = payload.get("username")
+            if username in self._friends_data:
+                self._friends_data[username].update(payload)
+            else:
+                self._friends_data[username] = payload
+            self.friend_status_updated_signal.emit(payload)
         elif msg_type == "p2p_connection_info":
             self._handle_p2p_info(payload)
         elif msg_type == "p2p_connection_offer":
             self._handle_p2p_offer(payload)
         elif msg_type == "friend_removed":
             self.friend_removed_signal.emit()
+        elif msg_type == "user_info":
+            self._handle_user_info(payload)
+
+    def _handle_user_info(self, payload):
+        self._user_email = payload.get("email", "")
+        self._user_ip = payload.get("ip", "")
+        self.user_info_received_signal.emit({
+            "email": self._user_email,
+            "ip": self._user_ip
+        })
+
+    def request_user_info(self):
+        request = {"type": "get_user_info"}
+        self.network.send_request(request)
+
+    def _handle_starred_friends_change(self, data):
+        username = data.get("username")
+        starred = data.get("starred")
+        action = "add_star" if starred else "remove_star"
+
+        request = {
+            "type": "star_friend",
+            "payload": {
+                "friend_username": username,
+                "action": action
+            }
+        }
+        self.network.send_request(request)
 
     def handle_p2p_message(self, message):
         data = message.get("data", {})
@@ -121,6 +163,10 @@ class ClientLogic(QObject):
                 self.registration_success_signal.emit()
             else:
                 self.registration_failed_signal.emit(data.get("message"))
+        # 在 _handle_server_response 方法中增加处理：
+        elif action == "request_verification_code":
+            message = data.get("message", "")
+            self.verification_code_sent_signal.emit(message)
         elif action == "login":
             if data.get("status") == "success":
                 self.login_success_signal.emit()
@@ -235,45 +281,21 @@ class ClientLogic(QObject):
         self._chat_modes[friend_username] = 'cs'
         self.p2p_status_updated_signal.emit(friend_username, 'p2p_fail')
 
-    def _handle_friend_status_update(self, payload):
-        username = payload.get("username")
-        status = payload.get("status")
-
-        if not username:
-            return
-
-        # Update friend data cache
-        if username in self._friends_data:
-            self._friends_data[username].update(payload)
-        else:
-            self._friends_data[username] = payload
-        
-        # Notify UI to update friend list (e.g., icon color)
-        self.friend_status_updated_signal.emit(payload)
-
-        # --- SESSION MANAGEMENT LOGIC ---
-        if status == "offline":
-            # 1. If in P2P mode, switch back to C/S
-            if self._chat_modes.get(username) == 'p2p':
-                self._chat_modes[username] = 'cs'
-                print(f"Switched back to C/S mode for {username}.")
-                self.p2p_status_updated_signal.emit(username, 'cs')
-            
-            # 2. Terminate session if it exists
-            if username in self._session_keys:
-                del self._session_keys[username]
-                print(f"Session with {username} terminated as they went offline.")
-                message = "对方已下线，会话已结束。重新上线后需要再次协商密钥。"
-                self.session_terminated_signal.emit(username, message)
-
     # --- User-Triggered Actions ---
 
-    def register(self, username, password, email):
+    # 修改现有的 register 方法：
+    def register(self, username, password, email, verification_code):  # 修改：增加验证码参数
         crypto.generate_keys_if_not_exist()
         public_key = crypto.get_public_key_pem()
         request = {
             "type": "register",
-            "payload": {"username": username, "password": password, "email": email, "public_key": public_key}
+            "payload": {
+                "username": username,
+                "password": password,
+                "email": email,
+                "public_key": public_key,
+                "verification_code": verification_code  # 新增
+            }
         }
         self.network.send_request(request)
 
@@ -393,4 +415,11 @@ class ClientLogic(QObject):
         return friend_username in self._session_keys
 
     def disconnect(self):
-        self.network.disconnect() 
+        self.network.disconnect()
+
+        # 在类的末尾增加新方法：
+
+    def request_verification_code(self, email):
+        """请求邮箱验证码"""
+        request = {"type": "request_verification_code", "payload": {"email": email}}
+        self.network.send_request(request)
