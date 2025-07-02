@@ -230,6 +230,7 @@ class MainWindow(QMainWindow):
 
         # 修改好友列表的点击事件
         self.friend_list_widget.itemClicked.connect(self._on_friend_clicked)  # 新增点击事件处理
+        self.friend_list_widget.currentItemChanged.connect(self._on_friend_selected)
 
         # 主布局
 
@@ -352,15 +353,33 @@ class MainWindow(QMainWindow):
         item.setIcon(self._create_status_icon(online_color, p2p_color))
 
     def add_message_to_chat(self, sender, message, is_self=False):
-        partner = self._get_current_partner_name()
-        if not partner: return
-
-        # Determine the target chat widget.
-        target_username = partner if is_self else sender
+        # This method handles both incoming and outgoing messages.
         
-        chat_widget = self.chat_widgets.get(target_username)
-        if chat_widget:
-             chat_widget.append_message(sender, message, is_self=is_self)
+        # For outgoing messages, find the active chat partner.
+        # For incoming messages, the sender is the partner.
+        partner_name = self._get_current_partner_name() if is_self else sender
+
+        # Ensure a chat widget exists for this partner.
+        if partner_name not in self.chat_widgets:
+            self._create_chat_widget(partner_name)
+        
+        chat_widget = self.chat_widgets.get(partner_name)
+        if not chat_widget:
+            return
+
+        # Add the message to the correct chat log.
+        chat_widget.append_message(sender, message, is_self=is_self)
+
+        # --- UNREAD MESSAGE NOTIFICATION ---
+        # If the message is from another user and their chat is not active, mark as unread.
+        if not is_self and self._get_current_partner_name() != sender:
+            for i in range(self.friend_list_widget.count()):
+                item = self.friend_list_widget.item(i)
+                if item.data(Qt.ItemDataRole.UserRole).get("username") == sender:
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+                    break
     
     def add_stego_image_to_chat(self, sender, image_bytes, hidden_text, is_self=False):
         partner = sender if not is_self else self._get_current_partner_name()
@@ -431,10 +450,11 @@ class MainWindow(QMainWindow):
         chat_widget.send_file_button.clicked.connect(self._on_send_file)
 
     def _get_current_partner_name(self):
-        item = self.friend_list_widget.currentItem()
-        if not item: return None
-        friend_data = item.data(Qt.ItemDataRole.UserRole)
-        return friend_data.get("username") if friend_data else None
+        """获取当前聊天窗口的伙伴名称。"""
+        current_chat = self._get_current_chat_widget()
+        if current_chat:
+            return current_chat.partner_name
+        return None
     
     def _is_current_partner_online(self):
         item = self.friend_list_widget.currentItem()
@@ -547,6 +567,15 @@ class MainWindow(QMainWindow):
             self._create_chat_widget(username)
         self.chat_stack.setCurrentWidget(self.chat_widgets[username])
 
+        # --- CLEAR UNREAD NOTIFICATION ---
+        for i in range(self.friend_list_widget.count()):
+            item = self.friend_list_widget.item(i)
+            if item.data(Qt.ItemDataRole.UserRole).get("username") == username:
+                font = item.font()
+                font.setBold(False)
+                item.setFont(font)
+                break
+
     def _show_friend_info(self, friend_data):
         username = friend_data.get("username")
         ip = friend_data.get("ip", "未知")
@@ -575,6 +604,36 @@ class MainWindow(QMainWindow):
         if isinstance(current_widget, ChatWidget):
             return current_widget
         return None
+
+    def _save_received_file(self, filename, file_bytes):
+        """保存接收到的文件到下载目录，处理文件名冲突。"""
+        if not file_bytes:
+            return None
+            
+        try:
+            os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+            base, ext = os.path.splitext(filename)
+            save_path = os.path.join(DOWNLOAD_DIR, filename)
+            counter = 1
+            while os.path.exists(save_path):
+                save_path = os.path.join(DOWNLOAD_DIR, f"{base}_{counter}{ext}")
+                counter += 1
+            
+            with open(save_path, 'wb') as f:
+                f.write(file_bytes)
+            
+            # Find the sender from the current chat context to show the message correctly
+            sender = self._get_current_partner_name()
+            if sender:
+                self.add_system_message(sender, f"收到文件 {filename}，已保存至 {DOWNLOAD_DIR}")
+            
+            return save_path
+        except Exception as e:
+            err_msg = f"保存文件时出错: {e}"
+            sender = self._get_current_partner_name()
+            if sender:
+                self.add_system_message(sender, err_msg)
+            return None
 
 class SettingsWindow(QWidget):
     def __init__(self, username, email, ip, parent=None):
