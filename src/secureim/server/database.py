@@ -68,18 +68,21 @@ def add_user(username, password, email, public_key):
     finally:
         conn.close()
 
-def check_credentials(username, password):
-    """验证用户凭据。"""
+def check_credentials(login_identifier, password):
+    """
+    使用用户名或邮箱验证用户凭据。
+    成功则返回用户名，否则返回None。
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
     password_hash = hash_password(password)
     cursor.execute(
-        "SELECT * FROM users WHERE username = ? AND password_hash = ?",
-        (username, password_hash)
+        "SELECT username FROM users WHERE (username = ? OR email = ?) AND password_hash = ?",
+        (login_identifier, login_identifier, password_hash)
     )
     user = cursor.fetchone()
     conn.close()
-    return user is not None
+    return user['username'] if user else None
 
 def get_user_public_key(username):
     """根据用户名检索公钥。"""

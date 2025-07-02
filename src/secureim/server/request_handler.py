@@ -1,3 +1,4 @@
+import re
 from . import database
 from .state import online_users
 
@@ -13,7 +14,37 @@ def send_to_client(client_socket, data):
 
 
 def handle_register(payload, send_func):
-    success = database.add_user(payload['username'], payload['password'], payload.get('email'), payload['public_key'])
+    username = payload.get('username')
+    password = payload.get('password')
+    email = payload.get('email')
+    public_key = payload.get('public_key')
+
+    # --- 服务器端验证 ---
+    if not all([username, password, email, public_key]):
+        response = {"type": "response", "action": "register", "status": "error", "message": "所有字段均为必填项。"}
+        send_func(response)
+        return None
+
+    if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+        response = {"type": "response", "action": "register", "status": "error", "message": "邮箱格式无效。"}
+        send_func(response)
+        return None
+
+    if len(password) < 8:
+        response = {"type": "response", "action": "register", "status": "error", "message": "密码长度必须至少为8位。"}
+        send_func(response)
+        return None
+    
+    has_letter = any(c.isalpha() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+
+    if not (has_letter and has_digit):
+        response = {"type": "response", "action": "register", "status": "error", "message": "密码必须包含字母和数字的组合。"}
+        send_func(response)
+        return None
+    # --- 验证结束 ---
+
+    success = database.add_user(username, password, email, public_key)
     message = "注册成功" if success else "用户名已存在。"
     status = "success" if success else "error"
     response = {"type": "response", "action": "register", "status": status, "message": message}
@@ -21,14 +52,17 @@ def handle_register(payload, send_func):
     return None # 注册后不立即登录
 
 def handle_login(payload, send_func, client_socket, address):
-    if database.check_credentials(payload['username'], payload['password']):
-        current_user = payload['username']
-        online_users.add_user(current_user, client_socket, address)
+    login_identifier = payload.get('username') # May be username or email
+    password = payload.get('password')
+    
+    username = database.check_credentials(login_identifier, password)
+    if username:
+        online_users.add_user(username, client_socket, address)
         response = {"type": "response", "action": "login", "status": "success", "message": "登录成功"}
         send_func(response)
-        print(f"用户 '{current_user}' 已登录。")
-        broadcast_status_update(current_user, "online", send_func)
-        return current_user
+        print(f"用户 '{username}' 已登录。")
+        broadcast_status_update(username, "online", send_func)
+        return username
     else:
         response = {"type": "response", "action": "login", "status": "error", "message": "凭据无效"}
         send_func(response)
