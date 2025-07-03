@@ -1,4 +1,6 @@
 import sys
+import time
+
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QTimer
 from .logic import ClientLogic
@@ -11,7 +13,7 @@ class MainController:
         self.logic = ClientLogic()
         self.login_window = LoginWindow()
         self.main_window = None
-
+        self.user_name = ""
         self.user_email = ""  # 存储用户邮箱
         self.user_ip = ""  # 存储用户IP
 
@@ -40,7 +42,23 @@ class MainController:
         self.logic.starred_friends_changed.connect(self._handle_starred_friends)
         self.logic.logout_success_signal.connect(self.on_logout_success)
         self.logic.session_terminated_signal.connect(self.on_session_terminated)
+        self.logic.mode_sync_request_signal.connect(self.handle_mode_sync_request)
 
+    def handle_mode_sync_request(self, from_user, requested_mode):
+        """处理模式切换请求"""
+        if not self.main_window:
+            return
+
+        mode_text = "P2P直连" if requested_mode == 'p2p' else "服务器中继"
+        reply = QMessageBox.question(
+            self.main_window,
+            "模式切换请求",
+            f"{from_user} 请求切换到 {mode_text} 模式。\n是否同意？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        approved = reply == QMessageBox.StandardButton.Yes
+        self.logic.respond_to_mode_change_request(from_user, requested_mode, approved)
 
     def _connect_login_window_signals(self):
         self.login_window.login_requested.connect(self.logic.login)
@@ -75,24 +93,35 @@ class MainController:
         self.user_email = ""
         self.user_ip = ""
 
-    def on_login_success(self):
-        current_username = self.login_window.login_username_input.text()
+    def on_login_success(self, username):
+        self.user_name = username
         self.login_window.close()
 
-        # 获取用户信息
-        self.logic.request_user_info()
+        # 检查是否已从登录响应中获取了用户信息
+        email = getattr(self.logic, '_user_email', '') or "获取中..."
+        ip = getattr(self.logic, '_user_ip', '') or "获取中..."
 
-        # 创建主窗口（稍后设置邮箱和IP）
+        print(f"[DEBUG] 登录成功，用户信息: 用户名={username}, 邮箱={email}, IP={ip}")
+
+        # 创建主窗口
         self.main_window = MainWindow(
-            username=current_username,
-            email=self.user_email,
-            ip=self.user_ip
+            username=self.user_name,
+            email=email,
+            ip=ip,
+            logic=self.logic
         )
 
         self._connect_main_window_signals()
         self.main_window.show()
-        
+
+        # 如果登录时没有获取到用户信息，才发送额外请求
+        if email == "获取中..." or ip == "获取中...":
+            print("[DEBUG] 用户信息不完整，发送额外请求")
+            QTimer.singleShot(200, self.logic.request_user_info)
+
+        # 请求好友列表
         QTimer.singleShot(500, self.logic.request_friends)
+
 
     def on_connection_failed(self):
         active_window = self.main_window if self.main_window and self.main_window.isVisible() else self.login_window
@@ -113,14 +142,21 @@ class MainController:
 
     def display_incoming_message(self, message_data):
         if self.main_window:
-            self.main_window.add_message_to_chat(message_data['from'], message_data['content'])
+            mode = message_data.get('mode', 'cs')  # 从消息数据中获取模式
+            self.main_window.add_message_to_chat(
+                message_data['from'],
+                message_data['content'],
+                mode=mode
+            )
 
     def display_incoming_stego(self, stego_data):
         if self.main_window:
             self.main_window.add_stego_image_to_chat(
-                stego_data['from'], 
-                stego_data['image_bytes'], 
-                stego_data['hidden_text']
+                stego_data['from'],
+                stego_data['image_bytes'],
+                stego_data['hidden_text'],
+                mode=stego_data.get('mode', 'cs'),
+                timestamp=stego_data.get('timestamp', time.time())
             )
 
     def display_incoming_file(self, file_data):
@@ -128,8 +164,11 @@ class MainController:
             self.main_window.add_file_to_chat(
                 file_data['from'],
                 file_data['filename'],
-                file_data['file_bytes']
+                file_data['file_bytes'],
+                mode=file_data.get('mode', 'cs'),
+                timestamp=file_data.get('timestamp', time.time())
             )
+
             
     def display_generic_response(self, response_data):
         if self.main_window:
@@ -147,10 +186,13 @@ class MainController:
         self.user_email = user_info.get("email", "")
         self.user_ip = user_info.get("ip", "")
 
+        # 添加调试信息
+        print(f"[DEBUG] 处理用户信息: 邮箱={self.user_email}, IP={self.user_ip}")
+
         # 更新主窗口的用户信息
         if self.main_window:
-            self.main_window.email = self.user_email
-            self.main_window.ip = self.user_ip
+            self.main_window.update_user_info(self.user_email, self.user_ip)
+            print(f"[DEBUG] 主窗口用户信息已更新: 邮箱={self.user_email}, IP={self.user_ip}")
 
     def _handle_starred_friends(self, data):
         if self.main_window:
