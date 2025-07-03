@@ -117,12 +117,23 @@ def handle_add_friend(payload, current_user, send_func):
     response = {"type": "response", "action": "add_friend", "status": status, "message": message}
     send_func(response)
 
-def handle_delete_friend(payload, current_user):
+def handle_delete_friend(payload, current_user, send_func):
     friend_username = payload.get('friend_username')
-    if not friend_username:
-        return False, None
     success = database.delete_friend(current_user, friend_username)
-    return success, friend_username
+    message = "好友已删除。" if success else "删除好友失败。"
+    status = "success" if success else "error"
+    response = {"type": "response", "action": "delete_friend", "status": status, "message": message, "payload": {"friend_username": friend_username}}
+    send_func(response)
+    
+    # 如果成功且对方在线，通知对方刷新列表
+    if success:
+        friend_socket = online_users.get_socket(friend_username)
+        if friend_socket:
+            notify = {"type": "friend_removed", "payload": {"username": current_user}}
+            # 这里需要一种方法来向特定用户发送消息
+            # 暂时无法直接调用，需要在 connection_handler 中完成
+            # send_to_specific_client(friend_socket, notify)
+            pass # 实际逻辑在 connection_handler 中
 
 def handle_get_friends(current_user, send_func):
     all_friends = database.get_friends(current_user)
@@ -453,7 +464,7 @@ def send_verification_email(recipient_email, verification_code):
         msg['From'] = EMAIL_CONFIG['sender_email']
         msg['To'] = recipient_email
         subject = 'SecureIM 邮箱验证码'
-        msg['Subject'] = str(Header(subject, 'utf-8'))
+        msg['Subject'] = Header(subject, 'utf-8')
 
         # 邮件正文
         email_body = f"""

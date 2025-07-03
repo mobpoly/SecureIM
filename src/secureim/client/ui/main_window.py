@@ -121,7 +121,9 @@ class ChatWidget(QWidget):
         self.chat_display.append(html)
         self.chat_display.repaint()
         self.chat_display.update()
-        self.chat_display.verticalScrollBar().setValue(self.chat_display.verticalScrollBar().maximum())
+        scrollbar = self.chat_display.verticalScrollBar()
+        if scrollbar:
+            scrollbar.setValue(scrollbar.maximum())
 
     def append_system_message(self, message):
         html = f'''
@@ -130,7 +132,9 @@ class ChatWidget(QWidget):
             </div>
         '''
         self.chat_display.append(html)
-        self.chat_display.verticalScrollBar().setValue(self.chat_display.verticalScrollBar().maximum())
+        scrollbar = self.chat_display.verticalScrollBar()
+        if scrollbar:
+            scrollbar.setValue(scrollbar.maximum())
 
     def append_file_info(self, sender, filename, file_path=None, is_self=False, mode='cs', timestamp=None):
         # 如果没有提供时间戳，使用当前时间
@@ -189,7 +193,9 @@ class ChatWidget(QWidget):
         '''
 
         self.chat_display.append(html)
-        self.chat_display.verticalScrollBar().setValue(self.chat_display.verticalScrollBar().maximum())
+        scrollbar = self.chat_display.verticalScrollBar()
+        if scrollbar:
+            scrollbar.setValue(scrollbar.maximum())
 
     def append_image(self, sender, image_bytes, hidden_text, is_self=False, mode='cs', timestamp=None):
         try:
@@ -252,9 +258,11 @@ class ChatWidget(QWidget):
             '''
 
             self.chat_display.append(html)
-            self.chat_display.verticalScrollBar().setValue(self.chat_display.verticalScrollBar().maximum())
+            scrollbar = self.chat_display.verticalScrollBar()
+            if scrollbar:
+                scrollbar.setValue(scrollbar.maximum())
         except Exception as e:
-            self.append_message("系统", f"显示图片时出错: {e}")
+            print(f"Error appending image: {e}")
 
     def add_system_message(self, username, message):
         """向指定用户的聊天窗口添加一条系统消息。"""
@@ -427,7 +435,7 @@ class MainWindow(QMainWindow):
         self.friend_list_widget.clear()
         # Sort friends to show online users first
         friends.sort(key=lambda f: f.get("status", "offline") == "offline")
-        self.friend_chat_modes.clear()
+
         for friend_data in friends:
             username = friend_data.get("username")
             self.friend_chat_modes.setdefault(username, 'cs')
@@ -441,22 +449,9 @@ class MainWindow(QMainWindow):
             self.friend_list_widget.addItem(item)
             self._update_friend_item_display(item)
 
-    def remove_friend_from_list(self, username):
-        """从好友列表中移除一个好友。"""
-        for i in range(self.friend_list_widget.count()):
-            item = self.friend_list_widget.item(i)
-            friend_data = item.data(Qt.ItemDataRole.UserRole)
-            if friend_data and friend_data.get("username") == username:
-                self.friend_list_widget.takeItem(i)
-                break
-        
-        if username in self.chat_widgets:
-            widget_to_remove = self.chat_widgets.pop(username)
-            self.chat_stack.removeWidget(widget_to_remove)
-            widget_to_remove.deleteLater()
-
     def set_friend_status(self, friend_update_data):
         username = friend_update_data.get("username")
+        status = friend_update_data.get("status")
         for i in range(self.friend_list_widget.count()):
             item = self.friend_list_widget.item(i)
             item_data = item.data(Qt.ItemDataRole.UserRole)
@@ -927,6 +922,24 @@ class MainWindow(QMainWindow):
         self._email = email if email else "未知"
         self._ip = ip if ip else "未知"
         print(f"[DEBUG] MainWindow用户信息已更新: 邮箱={self._email}, IP={self._ip}")
+
+    def remove_friend(self, username):
+        """从UI上移除一个好友。"""
+        # 从好友列表移除
+        for i in range(self.friend_list_widget.count()):
+            item = self.friend_list_widget.item(i)
+            if item and item.data(Qt.ItemDataRole.UserRole).get("username") == username:
+                self.friend_list_widget.takeItem(i)
+                break
+
+        # 从聊天堆栈中移除
+        if username in self.chat_widgets:
+            chat_widget = self.chat_widgets.pop(username)
+            # 切换到占位符页面，如果被删除的是当前聊天
+            if self.chat_stack.currentWidget() == chat_widget:
+                self.chat_stack.setCurrentIndex(0)
+            self.chat_stack.removeWidget(chat_widget)
+            chat_widget.deleteLater()
 
 
 class SettingsWindow(QWidget):

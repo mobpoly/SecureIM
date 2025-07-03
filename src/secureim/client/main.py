@@ -175,7 +175,7 @@ class MainController:
             title = response_data.get('action', '服务器响应').replace('_', ' ').title()
             message = response_data.get('message', '未收到消息。')
             self.main_window.show_generic_response(title, message)
-            if response_data.get('action') in ['add_friend', 'delete_friend'] and response_data.get('status') == 'success':
+            if response_data.get('action') == 'add_friend' and response_data.get('status') == 'success':
                 self.logic.request_friends()
 
     def on_verification_code_sent(self, message):
@@ -203,6 +203,10 @@ class MainController:
         if self.main_window:
             self.main_window.add_system_message(username, message)
 
+    def on_friend_removed(self, username):
+        if self.main_window:
+            self.main_window.remove_friend(username)
+
     def on_friend_selected(self, username):
         """处理用户在UI上选择好友的事件。"""
         # 1. 触发密钥交换（如果需要）
@@ -216,12 +220,6 @@ class MainController:
             chat_widget = self.main_window.chat_widgets.get(username)
             if chat_widget:
                 chat_widget.set_input_enabled(is_online)
-
-    def on_friend_removed(self, username):
-        """当一个好友被移除时更新UI"""
-        if self.main_window:
-            QMessageBox.information(self.main_window, "好友已移除", f"您与 {username} 不再是好友。")
-            self.main_window.remove_friend_from_list(username)
 
 
 def start_client():

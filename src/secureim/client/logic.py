@@ -1,7 +1,6 @@
 import os
 import time
 import uuid
-import random
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from .networking import Networking
@@ -9,7 +8,7 @@ from .utils import crypto, steganography
 
 SERVER_HOST = '127.0.0.1'
 SERVER_PORT = 12345
-P2P_PORT = random.randint(30001, 60001)
+P2P_PORT = 54321
 
 class ClientLogic(QObject):
     # Signals for UI updates
@@ -86,6 +85,11 @@ class ClientLogic(QObject):
             self._handle_p2p_info(payload)
         elif msg_type == "p2p_connection_offer":
             self._handle_p2p_offer(payload)
+        elif msg_type == "friend_removed":
+            username = payload.get("username")
+            if username:
+                self._cleanup_friend_data(username)
+                self.friend_removed_signal.emit(username)
         elif msg_type == "user_info":
             self._handle_user_info(payload)
         elif msg_type == "logout_response":
@@ -224,6 +228,7 @@ class ClientLogic(QObject):
 
     def _handle_server_response(self, data):
         action = data.get("action")
+        status = data.get("status")
         if action == "register":
             if data.get("status") == "success":
                 self.registration_success_signal.emit()
@@ -233,6 +238,12 @@ class ClientLogic(QObject):
         elif action == "request_verification_code":
             message = data.get("message", "")
             self.verification_code_sent_signal.emit(message)
+        elif action == "delete_friend" and status == "success":
+            payload = data.get("payload", {})
+            friend_username = payload.get("friend_username")
+            if friend_username:
+                self._cleanup_friend_data(friend_username)
+                self.friend_removed_signal.emit(friend_username)
         elif action == "login":
             if data.get("status") == "success":
                 server_username = data.get("username")
@@ -260,12 +271,6 @@ class ClientLogic(QObject):
                 self.login_success_signal.emit(self._username)
             else:
                 self.login_failed_signal.emit(data.get("message", "未知错误"))
-        elif action == "delete_friend":
-            if data.get("status") == "success":
-                friend_username = data.get("friend_username")
-                if friend_username:
-                    self._cleanup_friend_data(friend_username)
-                    self.friend_removed_signal.emit(friend_username)
         elif action == "get_user_info":  # 保留这个，以防需要手动刷新用户信息
             print(f"[DEBUG] 处理用户信息响应: {data}")
             if data.get("status") == "success":
@@ -478,7 +483,7 @@ class ClientLogic(QObject):
             self.connection_failed_signal.emit()
             return
         self._username = username
-        request = {"type": "login", "payload": {"username": username, "password": password, "p2p_port": P2P_PORT}}
+        request = {"type": "login", "payload": {"username": username, "password": password}}
         self.network.send_request(request)
 
     def initiate_key_exchange(self, friend_username):
@@ -654,7 +659,7 @@ class ClientLogic(QObject):
         # 发送P2P握手
         request = {"type": "p2p_handshake", "payload": {"from": self._username, "step": "offer"}}
         self.network.send_request(request, is_p2p=True,
-                                  recipient_addr=(friend_data["ip"], friend_data["port"]))
+                                  recipient_addr=(friend_data["ip"], P2P_PORT))
 
         # 设置超时
         timer = QTimer()
@@ -710,19 +715,18 @@ class ClientLogic(QObject):
         request = {"type": "request_verification_code", "payload": {"email": email}}
         self.network.send_request(request)
 
-    def _cleanup_friend_data(self, friend_username):
-        """清理与特定好友相关的所有本地数据"""
-        if friend_username in self._session_keys:
-            del self._session_keys[friend_username]
-        if friend_username in self._chat_modes:
-            del self._chat_modes[friend_username]
-        if friend_username in self._p2p_addresses:
-            del self._p2p_addresses[friend_username]
-        if friend_username in self._friends_data:
-            del self._friends_data[friend_username]
-        if friend_username in self._pending_messages:
-            del self._pending_messages[friend_username]
-        if friend_username in self._p2p_handshake_timers:
-            self._p2p_handshake_timers[friend_username].stop()
-            del self._p2p_handshake_timers[friend_username]
-        print(f"Cleaned up local data for removed friend: {friend_username}")
+    def _cleanup_friend_data(self, username):
+        """Cleans up all local data associated with a friend."""
+        if username in self._friends_data:
+            del self._friends_data[username]
+        if username in self._chat_modes:
+            del self._chat_modes[username]
+        if username in self._session_keys:
+            del self._session_keys[username]
+        if username in self._p2p_addresses:
+            del self._p2p_addresses[username]
+        if username in self._pending_messages:
+            del self._pending_messages[username]
+        if username in self._p2p_handshake_timers:
+            timer = self._p2p_handshake_timers.pop(username)
+            timer.stop()

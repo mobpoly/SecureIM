@@ -78,18 +78,13 @@ def handle_client_connection(client_socket, address):
                 # 4. 处理需要登录的请求
                 if msg_type == "add_friend":
                     handler.handle_add_friend(payload, current_user, send_func)
+                    # 通知被删除的好友
+                    friend_username = payload.get('friend_username')
+                    friend_socket = online_users.get_socket(friend_username)
+                    if friend_socket:
+                        send_to_client(friend_socket, {"type": "friend_removed", "payload": {"username": current_user}})
                 elif msg_type == "delete_friend":
-                    success, friend_username = handler.handle_delete_friend(payload, current_user)
-                    message = "好友已删除。" if success else "删除好友失败。"
-                    status = "success" if success else "error"
-                    response = {"type": "response", "action": "delete_friend", "status": status, "message": message, "friend_username": friend_username}
-                    send_func(response)
-
-                    if success and friend_username:
-                        friend_socket = online_users.get_socket(friend_username)
-                        if friend_socket:
-                            notification = {"type": "friend_removed", "payload": {"username": current_user}}
-                            send_to_client(friend_socket, notification)
+                    handler.handle_delete_friend(payload, current_user, send_func)
                 elif msg_type == "get_user_info":
                     handler.handle_get_user_info(current_user, send_func, address)
                 elif msg_type == "get_friends":
