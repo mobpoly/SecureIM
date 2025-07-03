@@ -112,6 +112,15 @@ def get_user_id(username):
     conn.close()
     return result['id'] if result else None
 
+def get_user_email(username):
+    """根据用户名检索邮箱。"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT email FROM users WHERE username = ?", (username,))
+    result = cursor.fetchone()
+    conn.close()
+    return result['email'] if result else None
+
 def add_friend(username1, username2):
     """添加一个好友关系。"""
     user_id1 = get_user_id(username1)
