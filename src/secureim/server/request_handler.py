@@ -6,6 +6,7 @@ from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+
 from . import database
 from .state import online_users, verification_codes
 
@@ -27,6 +28,47 @@ def send_to_client(client_socket, data):
     为简单起见，我们暂时从 connection_handler 传递套接字和 send_func。
     """
     raise NotImplementedError("This function should be passed from the connection handler.")
+
+
+def handle_change_password(payload, send_func):
+    """处理修改密码请求"""
+    identifier = payload.get('identifier')
+    new_password = payload.get('new_password')
+    verification_code = payload.get('verification_code')
+
+    # 验证参数
+    if not all([identifier, new_password, verification_code]):
+        response = {
+            "type": "response",
+            "action": "change_password",
+            "status": "error",
+            "message": "所有字段均为必填项"
+        }
+        send_func(response)
+        return
+
+    # 验证验证码
+    email = identifier if '@' in identifier else database.get_user_email(identifier)
+    if not email or not verification_codes.verify_code(email, verification_code):
+        response = {
+            "type": "response",
+            "action": "change_password",
+            "status": "error",
+            "message": "验证码错误或已过期"
+        }
+        send_func(response)
+        return
+
+    # 更新密码
+    success, message = database.update_password(identifier, new_password)
+    status = "success" if success else "error"
+    response = {
+        "type": "response",
+        "action": "change_password",
+        "status": status,
+        "message": message
+    }
+    send_func(response)
 
 
 def handle_register(payload, send_func):
@@ -81,7 +123,20 @@ def handle_login(payload, send_func, client_socket, address):
     username = database.check_credentials(login_identifier, password)
     if username:
         online_users.add_user(username, client_socket, address)
-        response = {"type": "response", "action": "login", "status": "success", "message": "登录成功"}
+        # 获取用户的完整信息
+        user_email = database.get_user_email(username)
+        user_ip = address[0] if address else "未知"
+        response = {
+            "type": "response",
+            "action": "login",
+            "status": "success",
+            "message": "登录成功",
+            "username": username,
+            "user_info": {  # 新增：用户信息
+                "email": user_email or "未知",
+                "ip": user_ip
+            }
+        }
         send_func(response)
         print(f"用户 '{username}' 已登录。")
         broadcast_status_update(username, "online", send_func)
@@ -108,7 +163,7 @@ def handle_delete_friend(payload, current_user, send_func):
     success = database.delete_friend(current_user, friend_username)
     message = "好友已删除。" if success else "删除好友失败。"
     status = "success" if success else "error"
-    response = {"type": "response", "action": "delete_friend", "status": status, "message": message}
+    response = {"type": "response", "action": "delete_friend", "status": status, "message": message, "payload": {"friend_username": friend_username}}
     send_func(response)
     
     # 如果成功且对方在线，通知对方刷新列表
@@ -125,6 +180,15 @@ def handle_get_friends(current_user, send_func):
     all_friends = database.get_friends(current_user)
     friend_data = []
     for f_user in all_friends:
+        # 特殊处理AI用户
+        if f_user == "ai":
+            friend_data.append({
+                "username": "ai",
+                "status": "online",
+                "ip": "0.0.0.0",
+                "port": 0
+            })
+            continue
         friend_info = online_users.get_user_info(f_user)
         if friend_info:
             friend_data.append({
@@ -166,6 +230,221 @@ def handle_relay(msg_type, payload, current_user, send_func):
         send_func(response)
 
 
+def handle_mode_change_request(payload, current_user, send_func):
+    """
+    处理模式切换请求
+    payload 应包含: target_username, requested_mode, request_id
+    """
+    target_username = payload.get('target_username')
+    requested_mode = payload.get('requested_mode')
+    request_id = payload.get('request_id')
+
+    # 验证参数
+    if not all([target_username, requested_mode, request_id]):
+        response = {
+            "type": "response",
+            "status": "error",
+            "message": "模式切换请求参数不完整"
+        }
+        send_func(response)
+        return
+
+    # 验证目标用户是否为好友
+    friends = database.get_friends(current_user)
+    if target_username not in friends:
+        response = {
+            "type": "response",
+            "status": "error",
+            "message": "只能向好友发送模式切换请求"
+        }
+        send_func(response)
+        return
+
+    # 检查目标用户是否在线
+    target_socket = online_users.get_socket(target_username)
+    if not target_socket:
+        response = {
+            "type": "response",
+            "status": "error",
+            "message": f"用户 '{target_username}' 不在线"
+        }
+        send_func(response)
+        return
+
+    # 转发请求给目标用户
+    forward_message = {
+        "type": "mode_change_request",
+        "payload": {
+            "from_username": current_user,
+            "requested_mode": requested_mode,
+            "request_id": request_id
+        }
+    }
+
+    try:
+        from .connection_handler import send_to_client
+        send_to_client(target_socket, forward_message)
+        print(f"[模式切换] '{current_user}' 向 '{target_username}' 请求切换到 '{requested_mode}' 模式")
+
+        # 向请求方发送确认
+        response = {
+            "type": "response",
+            "status": "success",
+            "message": "模式切换请求已发送"
+        }
+        send_func(response)
+
+    except Exception as e:
+        print(f"转发模式切换请求时发生错误: {e}")
+        response = {
+            "type": "response",
+            "status": "error",
+            "message": "发送模式切换请求失败"
+        }
+        send_func(response)
+
+
+def handle_mode_change_notification(payload, current_user, send_func):
+    """
+    处理模式变更通知
+    payload 应包含: target_username, new_mode
+    """
+    target_username = payload.get('target_username')
+    new_mode = payload.get('new_mode')
+
+    # 验证参数
+    if not all([target_username, new_mode]):
+        response = {
+            "type": "response",
+            "status": "error",
+            "message": "模式变更通知参数不完整"
+        }
+        send_func(response)
+        return
+
+    # 验证目标用户是否为好友
+    friends = database.get_friends(current_user)
+    if target_username not in friends:
+        response = {
+            "type": "response",
+            "status": "error",
+            "message": "只能向好友发送模式变更通知"
+        }
+        send_func(response)
+        return
+
+    # 检查目标用户是否在线
+    target_socket = online_users.get_socket(target_username)
+    if not target_socket:
+        # 如果目标用户不在线，不报错，只是记录日志
+        print(f"[模式切换] 无法通知离线用户 '{target_username}' 模式变更为 '{new_mode}'")
+        response = {
+            "type": "response",
+            "status": "success",
+            "message": "目标用户不在线，模式变更通知已记录"
+        }
+        send_func(response)
+        return
+
+    # 转发通知给目标用户
+    forward_message = {
+        "type": "mode_change_notification",
+        "payload": {
+            "from_username": current_user,
+            "new_mode": new_mode
+        }
+    }
+
+    try:
+        from .connection_handler import send_to_client
+        send_to_client(target_socket, forward_message)
+        print(f"[模式切换] '{current_user}' 通知 '{target_username}' 模式已变更为 '{new_mode}'")
+
+        # 向通知方发送确认
+        response = {
+            "type": "response",
+            "status": "success",
+            "message": "模式变更通知已发送"
+        }
+        send_func(response)
+
+    except Exception as e:
+        print(f"转发模式变更通知时发生错误: {e}")
+        response = {
+            "type": "response",
+            "status": "error",
+            "message": "发送模式变更通知失败"
+        }
+        send_func(response)
+
+
+def handle_mode_change_response(payload, current_user, send_func):
+    """
+    处理模式切换响应
+    payload 应包含: target_username, request_id, accepted, requested_mode
+    """
+    target_username = payload.get('target_username')
+    request_id = payload.get('request_id')
+    accepted = payload.get('accepted', False)
+    requested_mode = payload.get('requested_mode')
+
+    # 验证参数
+    if not all([target_username, request_id is not None, requested_mode]):
+        response = {
+            "type": "response",
+            "status": "error",
+            "message": "模式切换响应参数不完整"
+        }
+        send_func(response)
+        return
+
+    # 检查目标用户是否在线
+    target_socket = online_users.get_socket(target_username)
+    if not target_socket:
+        response = {
+            "type": "response",
+            "status": "error",
+            "message": f"用户 '{target_username}' 不在线"
+        }
+        send_func(response)
+        return
+
+    # 转发响应给请求方
+    forward_message = {
+        "type": "mode_change_response",
+        "payload": {
+            "from_username": current_user,
+            "request_id": request_id,
+            "accepted": accepted,
+            "requested_mode": requested_mode
+        }
+    }
+
+    try:
+        from .connection_handler import send_to_client
+        send_to_client(target_socket, forward_message)
+
+        action = "同意" if accepted else "拒绝"
+        print(f"[模式切换] '{current_user}' {action}了 '{target_username}' 的 '{requested_mode}' 模式切换请求")
+
+        # 向响应方发送确认
+        response = {
+            "type": "response",
+            "status": "success",
+            "message": "模式切换响应已发送"
+        }
+        send_func(response)
+
+    except Exception as e:
+        print(f"转发模式切换响应时发生错误: {e}")
+        response = {
+            "type": "response",
+            "status": "error",
+            "message": "发送模式切换响应失败"
+        }
+        send_func(response)
+
+
 def broadcast_status_update(username, status, send_func_for_user):
     """通知所有好友用户的状态变更。"""
     friends = database.get_friends(username)
@@ -179,11 +458,7 @@ def broadcast_status_update(username, status, send_func_for_user):
 
     message = {"type": "friend_status_update", "payload": payload}
 
-    for friend in friends:
-        friend_socket = online_users.get_socket(friend)
-        if friend_socket:
-            # send_to_specific_client(friend_socket, message)
-            pass # 实际逻辑在 connection_handler 中
+    return message
 
 
 def handle_request_verification_code(payload, send_func):
@@ -319,3 +594,23 @@ def send_verification_email(recipient_email, verification_code):
         error_msg = f"发送邮件时发生未知错误: {str(e)}"
         print(f"❌ 未知错误: {error_msg}")
         return False, error_msg
+
+
+def handle_get_user_info(current_user, send_func, address):
+    """处理获取用户信息请求"""
+    # 获取用户的邮箱
+    user_email = database.get_user_email(current_user)
+
+    # 获取用户的IP地址（从连接地址中获取）
+    user_ip = address[0] if address else "未知"
+    print(f"[DEBUG] 处理用户信息请求: {current_user}, 邮箱={user_email}, IP={user_ip}")
+
+    response = {
+        "type": "user_info",
+        "payload": {
+            "username": current_user,
+            "email": user_email or "未知",
+            "ip": user_ip
+        }
+    }
+    send_func(response)

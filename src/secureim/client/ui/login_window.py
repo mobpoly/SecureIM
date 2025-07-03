@@ -4,13 +4,84 @@ from PyQt6.QtWidgets import (
     QPushButton, QMessageBox, QStackedWidget, QLabel, QHBoxLayout
 )
 from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtWidgets import QDialog
+
+
+class ForgotPasswordDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("修改密码")
+        self.setFixedSize(350, 300)
+
+        layout = QVBoxLayout()
+        form_layout = QFormLayout()
+
+        self.identifier_input = QLineEdit(self)
+        self.identifier_input.setPlaceholderText("输入您的邮箱")
+        self.new_password_input = QLineEdit(self)
+        self.new_password_input.setPlaceholderText("输入新密码")
+        self.new_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.verification_code_input = QLineEdit(self)
+        self.verification_code_input.setPlaceholderText("输入验证码")
+
+        verification_layout = QHBoxLayout()
+        self.get_code_button = QPushButton("获取验证码")
+        verification_layout.addWidget(self.verification_code_input)
+        verification_layout.addWidget(self.get_code_button)
+
+        form_layout.addRow(QLabel("邮箱:"), self.identifier_input)
+        form_layout.addRow(QLabel("新密码:"), self.new_password_input)
+        form_layout.addRow(QLabel("验证码:"), verification_layout)
+
+        button_layout = QHBoxLayout()
+        self.change_button = QPushButton("修改密码")
+        self.cancel_button = QPushButton("取消")
+        button_layout.addWidget(self.change_button)
+        button_layout.addWidget(self.cancel_button)
+
+        layout.addLayout(form_layout)
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+        # 连接信号
+        self.get_code_button.clicked.connect(self.on_get_code)
+        self.change_button.clicked.connect(self.on_change_password)
+        self.cancel_button.clicked.connect(self.reject)
+
+    def on_get_code(self):
+        email = self.identifier_input.text().strip()
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+            QMessageBox.warning(self, "错误", "请输入有效的邮箱地址")
+            return
+        self.parent().verification_code_requested.emit(email)
+
+
+    def on_change_password(self):
+        identifier = self.identifier_input.text().strip()
+        new_password = self.new_password_input.text()
+        verification_code = self.verification_code_input.text().strip()
+
+        if not all([identifier, new_password, verification_code]):
+            QMessageBox.warning(self, "错误", "所有字段均为必填项")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "确认修改",
+            "确定要修改密码吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.parent().change_password_requested.emit(identifier, new_password, verification_code)
+            self.accept()
 
 class LoginWindow(QWidget):
     # 用于连接到主应用控制器的信号
     login_requested = pyqtSignal(str, str)
     register_requested = pyqtSignal(str, str, str, str)  # 修改：增加verification_code参数
-    # 新增信号
     verification_code_requested = pyqtSignal(str)  # 参数：email
+    change_password_requested = pyqtSignal(str, str, str)  # identifier, new_password, verification_code
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -38,6 +109,10 @@ class LoginWindow(QWidget):
 
         self.setLayout(main_layout)
 
+    def show_forgot_password_dialog(self):
+        dialog = ForgotPasswordDialog(self)
+        dialog.exec()
+
     def _setup_login_ui(self):
         layout = QVBoxLayout()
         form_layout = QFormLayout()
@@ -50,17 +125,25 @@ class LoginWindow(QWidget):
 
         form_layout.addRow(QLabel("用户名:"), self.login_username_input)
         form_layout.addRow(QLabel("密码:"), self.login_password_input)
-        
+
         login_button = QPushButton("登录", self)
         login_button.clicked.connect(self.on_login)
 
         switch_to_register_button = QPushButton("没有账户？点击注册", self)
-        switch_to_register_button.setObjectName("linkButton") # 用于样式设置
+        switch_to_register_button.setObjectName("linkButton")  # 用于样式设置
         switch_to_register_button.clicked.connect(lambda: self.stacked_widget.setCurrentWidget(self.register_page))
+        forgot_password_button = QPushButton("忘记密码？点击修改", self)
+        forgot_password_button.setObjectName("linkButton")
+        forgot_password_button.clicked.connect(self.show_forgot_password_dialog)
+
+        # 创建链接按钮的垂直布局，并添加两个按钮
+        links_layout = QVBoxLayout()
+        links_layout.addWidget(switch_to_register_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        links_layout.addWidget(forgot_password_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addLayout(form_layout)
         layout.addWidget(login_button)
-        layout.addWidget(switch_to_register_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addLayout(links_layout)  # 添加链接按钮布局
         self.login_page.setLayout(layout)
 
     def _setup_register_ui(self):

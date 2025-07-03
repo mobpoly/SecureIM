@@ -53,6 +53,25 @@ class EmailVerificationCodes:
                 return True
             return False
 
+class AISessionKeys:
+    def __init__(self):
+        self._keys = {}  # username -> aes_key (bytes)
+        self._lock = threading.Lock()
+
+    def store_key(self, username, key):
+        with self._lock:
+            self._keys[username] = key
+
+    def get_key(self, username):
+        with self._lock:
+            return self._keys.get(username)
+
+    def remove_key(self, username):
+        with self._lock:
+            if username in self._keys:
+                del self._keys[username]
+
 # 全局单例
 online_users = OnlineUsers()
 verification_codes = EmailVerificationCodes()
+ai_session_keys = AISessionKeys()  # AI会话密钥管理器
