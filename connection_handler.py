@@ -32,6 +32,7 @@ def broadcast_status_update(username, status):
             send_to_client(friend_socket, message)
 
 
+
 def handle_client_connection(client_socket, address):
     """处理与单个客户端的通信。"""
     print(f"来自 {address} 的新连接")
@@ -82,12 +83,22 @@ def handle_client_connection(client_socket, address):
                     friend_socket = online_users.get_socket(friend_username)
                     if friend_socket:
                         send_to_client(friend_socket, {"type": "friend_removed", "payload": {"username": current_user}})
-
+                elif msg_type == "get_user_info":
+                    handler.handle_get_user_info(current_user, send_func, address)
                 elif msg_type == "get_friends":
                     handler.handle_get_friends(current_user, send_func)
 
                 elif msg_type == "get_public_key":
                     handler.handle_get_public_key(payload, send_func)
+
+                elif msg_type == "mode_change_request":
+                    handler.handle_mode_change_request(payload, current_user, send_func)
+
+                elif msg_type == "mode_change_response":
+                    handler.handle_mode_change_response(payload, current_user, send_func)
+
+                elif msg_type == "mode_change_notification":
+                    handler.handle_mode_change_notification(payload, current_user, send_func)
 
                 elif msg_type in ["relay_message", "relay_session_key"]:
                     to_user = payload.get('to')

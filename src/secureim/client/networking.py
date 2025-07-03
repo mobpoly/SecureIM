@@ -69,21 +69,16 @@ class Networking(QObject):
     def _listen_for_p2p_messages(self):
         while self._is_listening:
             try:
-                if not self._p2p_socket:
-                    break
                 data, addr = self._p2p_socket.recvfrom(8192)
-                if not data:
-                    break
                 message = json.loads(data.decode('utf-8').strip())
                 self.p2p_message_received_signal.emit({"data": message, "addr": addr})
-            except (socket.error, json.JSONDecodeError) as e:
-                if self._is_listening:
-                    print(f"P2P监听器出错: {e}")
-                break
+            except OSError as e:
+                # 检查是否是因为套接字关闭导致的错误
+                if not self._is_listening:
+                    break  # 正常退出
+                print(f"P2P监听器出错 (OSError): {e}")
             except Exception as e:
-                if self._is_listening:
-                    print(f"P2P监听器发生未知错误: {e}")
-                break
+                print(f"P2P监听器出错 (其他错误): {e}")
 
     def _listen_for_server_messages(self):
         while self._is_listening:
@@ -103,28 +98,10 @@ class Networking(QObject):
                 self.connection_failed_signal.emit()
                 break
 
-    def logout(self, username):
-        """向服务器发送登出请求。"""
-        if self._socket:
-            try:
-                request = {"type": "logout", "payload": {"username": username}}
-                self.send_request(request)
-                print(f"已发送用户 {username} 的登出请求。")
-            except Exception as e:
-                print(f"发送登出请求时出错: {e}")
-
     def disconnect(self):
         self._is_listening = False
         if self._socket:
-            try:
-                self._socket.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass # 忽略套接字已关闭的错误
             self._socket.close()
-            self._socket = None
-
         if self._p2p_socket:
             self._p2p_socket.close()
-            self._p2p_socket = None
-            
         print("网络连接已断开。") 
