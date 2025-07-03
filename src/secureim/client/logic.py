@@ -3,7 +3,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from .networking import Networking
 from .utils import crypto, steganography
 
-SERVER_HOST = ''
+SERVER_HOST = '127.0.0.1'
 SERVER_PORT = 12345
 P2P_PORT = 54321
 
@@ -25,9 +25,9 @@ class ClientLogic(QObject):
     incoming_message_signal = pyqtSignal(dict)
     incoming_stego_signal = pyqtSignal(dict)
     incoming_file_signal = pyqtSignal(dict)
-    logout_success_signal = pyqtSignal()
+    
     p2p_status_updated_signal = pyqtSignal(str, str)
-    session_terminated_signal = pyqtSignal(str, str)  # 重新添加会话终止信号
+    session_terminated_signal = pyqtSignal(str, str) # 重新添加会话终止信号
 
     user_info_received_signal = pyqtSignal(dict)  # 新增信号：用户信息接收
     starred_friends_changed = pyqtSignal(dict)  # 新增信号：特别关注好友变化
@@ -55,9 +55,6 @@ class ClientLogic(QObject):
         if self.network.connect_to_server():
             self.network.setup_p2p_listener()
 
-
-
-
     def handle_server_message(self, data):
         msg_type = data.get("type")
         payload = data.get("payload", {})
@@ -84,9 +81,6 @@ class ClientLogic(QObject):
             self.friend_removed_signal.emit()
         elif msg_type == "user_info":
             self._handle_user_info(payload)
-        elif msg_type == "logout_response":
-            # 服务器确认退出登录
-            pass
 
     def _handle_user_info(self, payload):
         self._user_email = payload.get("email", "")
@@ -295,7 +289,7 @@ class ClientLogic(QObject):
             self._friends_data[username].update(payload)
         else:
             self._friends_data[username] = payload
-
+        
         # Notify UI to update friend list (e.g., icon color)
         self.friend_status_updated_signal.emit(payload)
 
@@ -306,33 +300,13 @@ class ClientLogic(QObject):
                 self._chat_modes[username] = 'cs'
                 print(f"Switched back to C/S mode for {username} as they went offline.")
                 self.p2p_status_updated_signal.emit(username, 'cs')
-
+            
             # 2. Terminate session if it exists
             if username in self._session_keys:
                 del self._session_keys[username]
                 print(f"Session with {username} terminated as they went offline.")
                 message = "对方已下线，会话已结束。重新上线后需要再次协商密钥。"
                 self.session_terminated_signal.emit(username, message)
-
-    def logout(self):
-        """处理退出登录"""
-        if self._username:
-            # 发送退出登录请求到服务器
-            request = {"type": "logout"}
-            self.network.send_request(request)
-
-        # 清理本地状态
-        self._username = None
-        self._session_keys = {}
-        self._chat_modes = {}
-        self._p2p_addresses = {}
-        self._friends_data = {}
-        self._pending_messages = {}
-
-
-
-        # 通知UI
-        self.logout_success_signal.emit()
 
     # --- User-Triggered Actions ---
 
@@ -353,9 +327,6 @@ class ClientLogic(QObject):
         self.network.send_request(request)
 
     def login(self, username, password):
-        if not self.network._socket:  # 检查是否已连接服务器
-            self.connection_failed_signal.emit()
-            return
         self._username = username
         request = {"type": "login", "payload": {"username": username, "password": password}}
         self.network.send_request(request)
@@ -473,9 +444,22 @@ class ClientLogic(QObject):
     def disconnect(self):
         self.network.disconnect()
 
-        # 在类的末尾增加新方法：
+    # 在类的末尾增加新方法：
 
     def request_verification_code(self, email):
-        """请求邮箱验证码"""
+        """请求发送验证码到指定邮箱。"""
         request = {"type": "request_verification_code", "payload": {"email": email}}
         self.network.send_request(request)
+
+    def logout(self):
+        """处理用户登出。"""
+        if self._username:
+            self.network.logout(self._username)
+        self.disconnect()
+        # Reset client state
+        self._username = None
+        self._session_keys = {}
+        self._chat_modes = {}
+        self._p2p_addresses = {}
+        self._friends_data = {}
+        print("已登出并重置客户端状态。")
