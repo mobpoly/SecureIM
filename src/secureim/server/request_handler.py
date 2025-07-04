@@ -30,6 +30,47 @@ def send_to_client(client_socket, data):
     raise NotImplementedError("This function should be passed from the connection handler.")
 
 
+def handle_change_password(payload, send_func):
+    """处理修改密码请求"""
+    identifier = payload.get('identifier')
+    new_password = payload.get('new_password')
+    verification_code = payload.get('verification_code')
+
+    # 验证参数
+    if not all([identifier, new_password, verification_code]):
+        response = {
+            "type": "response",
+            "action": "change_password",
+            "status": "error",
+            "message": "所有字段均为必填项"
+        }
+        send_func(response)
+        return
+
+    # 验证验证码
+    email = identifier if '@' in identifier else database.get_user_email(identifier)
+    if not email or not verification_codes.verify_code(email, verification_code):
+        response = {
+            "type": "response",
+            "action": "change_password",
+            "status": "error",
+            "message": "验证码错误或已过期"
+        }
+        send_func(response)
+        return
+
+    # 更新密码
+    success, message = database.update_password(identifier, new_password)
+    status = "success" if success else "error"
+    response = {
+        "type": "response",
+        "action": "change_password",
+        "status": status,
+        "message": message
+    }
+    send_func(response)
+
+
 def handle_register(payload, send_func):
     username = payload.get('username')
     password = payload.get('password')
@@ -139,6 +180,15 @@ def handle_get_friends(current_user, send_func):
     all_friends = database.get_friends(current_user)
     friend_data = []
     for f_user in all_friends:
+        # 特殊处理AI用户
+        if f_user == "ai":
+            friend_data.append({
+                "username": "ai",
+                "status": "online",
+                "ip": "0.0.0.0",
+                "port": 0
+            })
+            continue
         friend_info = online_users.get_user_info(f_user)
         if friend_info:
             friend_data.append({

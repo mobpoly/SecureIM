@@ -6,7 +6,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from .networking import Networking
 from .utils import crypto, steganography
 
-SERVER_HOST = '127.0.0.1'
+SERVER_HOST = '0.0.0.0'
 SERVER_PORT = 12345
 P2P_PORT = 54321
 
@@ -36,6 +36,9 @@ class ClientLogic(QObject):
     starred_friends_changed = pyqtSignal(dict)  # 新增信号：特别关注好友变化
     mode_sync_request_signal = pyqtSignal(str, str)
 
+    change_password_success_signal = pyqtSignal()
+    change_password_failed_signal = pyqtSignal(str)
+
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -61,7 +64,17 @@ class ClientLogic(QObject):
         if self.network.connect_to_server():
             self.network.setup_p2p_listener()
 
-
+    def change_password(self, identifier, new_password, verification_code):
+        """发送修改密码请求"""
+        request = {
+            "type": "change_password",
+            "payload": {
+                "identifier": identifier,
+                "new_password": new_password,
+                "verification_code": verification_code
+            }
+        }
+        self.network.send_request(request)
 
     def handle_server_message(self, data):
         msg_type = data.get("type")
@@ -700,7 +713,12 @@ class ClientLogic(QObject):
         self.network.send_request({"type": "add_friend", "payload": {"friend_username": friend_username}})
 
     def delete_friend(self, friend_username):
+        # 发送删除请求
         self.network.send_request({"type": "delete_friend", "payload": {"friend_username": friend_username}})
+
+        # 立即更新本地状态，不需要等待服务器响应
+        self._cleanup_friend_data(friend_username)
+        self.friend_removed_signal.emit(friend_username)
     
     def has_session_key(self, friend_username):
         return friend_username in self._session_keys

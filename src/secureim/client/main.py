@@ -36,13 +36,14 @@ class MainController:
         self.logic.generic_response_signal.connect(self.display_generic_response)
         self.logic.p2p_status_updated_signal.connect(self.update_chat_mode_indicator)
         self.logic.friend_removed_signal.connect(self.on_friend_removed)
-        # 在 _connect_logic_signals 方法中增加：
         self.logic.verification_code_sent_signal.connect(self.on_verification_code_sent)
         self.logic.user_info_received_signal.connect(self.handle_user_info)
         self.logic.starred_friends_changed.connect(self._handle_starred_friends)
         self.logic.logout_success_signal.connect(self.on_logout_success)
         self.logic.session_terminated_signal.connect(self.on_session_terminated)
         self.logic.mode_sync_request_signal.connect(self.handle_mode_sync_request)
+        self.logic.change_password_success_signal.connect(self.on_password_changed)
+        self.logic.change_password_failed_signal.connect(self.on_password_change_failed)
 
     def handle_mode_sync_request(self, from_user, requested_mode):
         """处理模式切换请求"""
@@ -64,7 +65,15 @@ class MainController:
         self.login_window.login_requested.connect(self.logic.login)
         self.login_window.register_requested.connect(self.logic.register)
         self.login_window.verification_code_requested.connect(self.logic.request_verification_code)
+        self.login_window.change_password_requested.connect(self.logic.change_password)
 
+    def on_password_changed(self):
+        if self.login_window:
+            self.login_window.show_info("密码修改成功！")
+
+    def on_password_change_failed(self, message):
+        if self.login_window:
+            self.login_window.show_error(f"密码修改失败: {message}")
 
     def _connect_main_window_signals(self):
         if self.main_window:
@@ -83,7 +92,7 @@ class MainController:
         if self.main_window:
             self.main_window.close()
             self.main_window = None
-
+            
         # 重新显示登录窗口
         self.login_window = LoginWindow()
         self._connect_login_window_signals()
@@ -204,8 +213,15 @@ class MainController:
             self.main_window.add_system_message(username, message)
 
     def on_friend_removed(self, username):
+        """处理好友被移除的事件"""
         if self.main_window:
             self.main_window.remove_friend(username)
+
+            # 确保关闭任何可能打开的菜单
+            if hasattr(self.main_window, 'context_menu'):
+                self.main_window.context_menu.close()
+                self.main_window.context_menu.deleteLater()
+                del self.main_window.context_menu
 
     def on_friend_selected(self, username):
         """处理用户在UI上选择好友的事件。"""

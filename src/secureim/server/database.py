@@ -8,6 +8,37 @@ os.makedirs(DATA_DIR, exist_ok=True)
 DB_FILE = os.path.join(DATA_DIR, 'server.db')
 
 
+def update_password(identifier, new_password):
+    """更新用户密码"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        password_hash = hash_password(new_password)
+
+        # 根据标识符类型决定查询条件
+        if '@' in identifier:
+            cursor.execute(
+                "UPDATE users SET password_hash = ? WHERE email = ?",
+                (password_hash, identifier)
+            )
+        else:
+            cursor.execute(
+                "UPDATE users SET password_hash = ? WHERE username = ?",
+                (password_hash, identifier)
+            )
+
+        conn.commit()
+
+        if cursor.rowcount == 0:
+            return False, "用户不存在"
+
+        return True, "密码更新成功"
+    except Exception as e:
+        return False, f"数据库错误: {str(e)}"
+    finally:
+        conn.close()
+
 def get_db_connection():
     """建立到数据库的连接。"""
     conn = sqlite3.connect(DB_FILE)
@@ -40,7 +71,47 @@ def create_tables():
             FOREIGN KEY(user_id2) REFERENCES users(id)
         );
     ''')
-    
+
+
+    cursor.execute("SELECT COUNT(*) FROM users WHERE username = 'ai'")
+    if cursor.fetchone()[0] == 0:
+        # 为AI生成真实的RSA密钥对
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.backends import default_backend
+
+        # 生成私钥
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=default_backend()
+        )
+
+        # 获取公钥
+        public_key = private_key.public_key()
+
+        # 序列化公钥
+        public_key_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        ).decode('utf-8')
+
+        # 保存私钥到文件（用于服务器解密）
+        ai_private_key_path = os.path.join(DATA_DIR, 'ai_private_key.pem')
+        with open(ai_private_key_path, 'wb') as f:
+            f.write(private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            ))
+
+        # 插入AI用户
+        cursor.execute(
+            "INSERT INTO users (username, password_hash, email, public_key) VALUES (?, ?, ?, ?)",
+            ("ai", hash_password("ai_password"), "ai@system.local", public_key_pem)
+        )
+        print("AI用户已创建，并生成了密钥对")
+
     conn.commit()
     conn.close()
     print(f"数据库表已在 {DB_FILE} 创建或已存在。")
@@ -57,6 +128,10 @@ def add_user(username, password, email, public_key):
     if not all([username, password, email, public_key]):
         return False, "所有字段均为必填项。"
 
+    # 阻止注册"ai"用户名
+    if username.lower() == 'ai':
+        return False, "该用户名已被系统保留"
+
     conn = get_db_connection()
     cursor = conn.cursor()
     password_hash = hash_password(password)
@@ -66,6 +141,22 @@ def add_user(username, password, email, public_key):
             (username, password_hash, email, public_key)
         )
         conn.commit()
+
+        # 新注册用户自动添加AI为好友
+        ai_id = get_user_id("ai")
+        new_user_id = get_user_id(username)
+        if ai_id and new_user_id:
+            # 添加双向好友关系
+            if new_user_id > ai_id:
+                user_id1, user_id2 = ai_id, new_user_id
+            else:
+                user_id1, user_id2 = new_user_id, ai_id
+            cursor.execute(
+                "INSERT INTO friendships (user_id1, user_id2) VALUES (?, ?)",
+                (user_id1, user_id2)
+            )
+            conn.commit()
+
         return True, "注册成功"
     except sqlite3.IntegrityError as e:
         error_message = str(e).lower()

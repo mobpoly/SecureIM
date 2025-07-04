@@ -71,15 +71,26 @@ class ChatWidget(QWidget):
         # 格式化时间戳
         time_str = time.strftime("%H:%M:%S", time.localtime(timestamp))
 
-        # 根据模式设置背景颜色
+        # 根据模式和发送者设置背景颜色和文字颜色
         if mode == 'p2p':
-            bubble_color = "#90EE90"  # 更鲜明的绿色
-            text_color = "#006400"  # 深绿色文字
-            mode_text = "[P2P直连]"
-        else:
-            bubble_color = "#87CEEB"  # 更鲜明的蓝色
-            text_color = "#000080"  # 深蓝色文字
-            mode_text = "[服务器中继]"
+            if is_self:
+                # P2P模式下自己发送的消息 - 淡红色背景
+                bubble_color = "#FFCCCC"  # 淡红色
+                text_color = "#990000"  # 深红色文字
+
+            else:
+                # P2P模式下好友发送的消息 - 淡橙黄色背景
+                bubble_color = "#FFE0B2"  # 淡橙黄色
+                text_color = "#995C00"  # 深橙色文字
+        else:  # cs模式
+            if is_self:
+                # CS模式下自己发送的消息 - 绿色背景
+                bubble_color = "#CCFFCC"  # 淡绿色
+                text_color = "#006600"  # 深绿色文字
+            else:
+                # CS模式下好友发送的消息 - 淡蓝色背景
+                bubble_color = "#CCE5FF"  # 淡蓝色
+                text_color = "#000066"  # 深蓝色文字
 
         text_align = 'right' if align_right else 'left'
 
@@ -88,6 +99,7 @@ class ChatWidget(QWidget):
         message = escape(message).replace('\n', '<br>')
 
         # 添加时间戳和模式信息
+        mode_text = "[P2P直连]" if mode == 'p2p' else "[服务器中继]"
         time_info = f'<div style="font-size: 0.8em; color: #666; margin-bottom: 3px;">{time_str} {mode_text}</div>'
 
         # 使用表格结构确保背景色显示
@@ -144,15 +156,25 @@ class ChatWidget(QWidget):
         # 格式化时间戳
         time_str = time.strftime("%H:%M:%S", time.localtime(timestamp))
 
-        # 根据模式设置背景颜色和模式文本
+        # 根据模式和发送者设置背景颜色和边框颜色
         if mode == 'p2p':
-            bubble_color = "#90EE90"  # 绿色背景
-            border_color = "#006400"
-            mode_text = "[P2P直连]"
-        else:
-            bubble_color = "#87CEEB"  # 蓝色背景
-            border_color = "#000080"
-            mode_text = "[服务器中继]"
+            if is_self:
+                # P2P模式下自己发送的文件 - 淡红色背景
+                bubble_color = "#FFCCCC"  # 淡红色
+                border_color = "#990000"  # 深红色边框
+            else:
+                # P2P模式下好友发送的文件 - 淡橙黄色背景
+                bubble_color = "#FFE0B2"  # 淡橙黄色
+                border_color = "#995C00"  # 深橙色边框
+        else:  # cs模式
+            if is_self:
+                # CS模式下自己发送的文件 - 绿色背景
+                bubble_color = "#CCFFCC"  # 淡绿色
+                border_color = "#006600"  # 深绿色边框
+            else:
+                # CS模式下好友发送的文件 - 淡蓝色背景
+                bubble_color = "#CCE5FF"  # 淡蓝色
+                border_color = "#000066"  # 深蓝色边框
 
         align_right = is_self
         text_align = 'right' if align_right else 'left'
@@ -164,6 +186,7 @@ class ChatWidget(QWidget):
             inner_html = f'已发送文件: {filename}'
 
         # 添加时间戳和模式信息
+        mode_text = "[P2P直连]" if mode == 'p2p' else "[服务器中继]"
         time_info = f'<div style="font-size: 0.8em; color: #666; margin-bottom: 3px;">{time_str} {mode_text}</div>'
 
         from html import escape
@@ -214,20 +237,31 @@ class ChatWidget(QWidget):
             # 格式化时间戳
             time_str = time.strftime("%H:%M:%S", time.localtime(timestamp))
 
-            # 根据模式设置背景颜色和模式文本
+            # 根据模式和发送者设置背景颜色和边框颜色
             if mode == 'p2p':
-                bubble_color = "#90EE90"  # 绿色背景
-                border_color = "#006400"
-                mode_text = "[P2P直连]"
-            else:
-                bubble_color = "#87CEEB"  # 蓝色背景
-                border_color = "#000080"
-                mode_text = "[服务器中继]"
+                if is_self:
+                    # P2P模式下自己发送的图片 - 淡红色背景
+                    bubble_color = "#FFCCCC"  # 淡红色
+                    border_color = "#990000"  # 深红色边框
+                else:
+                    # P2P模式下好友发送的图片 - 淡橙黄色背景
+                    bubble_color = "#FFE0B2"  # 淡橙黄色
+                    border_color = "#995C00"  # 深橙色边框
+            else:  # cs模式
+                if is_self:
+                    # CS模式下自己发送的图片 - 绿色背景
+                    bubble_color = "#CCFFCC"  # 淡绿色
+                    border_color = "#006600"  # 深绿色边框
+                else:
+                    # CS模式下好友发送的图片 - 淡蓝色背景
+                    bubble_color = "#CCE5FF"  # 淡蓝色
+                    border_color = "#000066"  # 深蓝色边框
 
             align_right = is_self
             text_align = 'right' if align_right else 'left'
 
             # 添加时间戳和模式信息
+            mode_text = "[P2P直连]" if mode == 'p2p' else "[服务器中继]"
             time_info = f'<div style="font-size: 0.8em; color: #666; margin-bottom: 3px;">{time_str} {mode_text}</div>'
 
             from html import escape
@@ -602,31 +636,44 @@ class MainWindow(QMainWindow):
         is_online = friend_data.get("status") == "online"
         current_mode = self.friend_chat_modes.get(username, 'cs')
 
-        menu = QMenu()
+        # 创建菜单并存储为实例变量
+        self.context_menu = QMenu(self)
 
         # 模式切换选项
         if is_online:
             if current_mode == 'cs':
                 p2p_action = QAction("请求 P2P 直连", self)
                 p2p_action.triggered.connect(lambda: self.mode_change_requested.emit(username, 'p2p'))
-                menu.addAction(p2p_action)
+                self.context_menu.addAction(p2p_action)
             else:
                 cs_action = QAction("切换到服务器中继", self)
                 cs_action.triggered.connect(lambda: self.mode_change_requested.emit(username, 'cs'))
-                menu.addAction(cs_action)
+                self.context_menu.addAction(cs_action)
         else:
             offline_action = QAction("用户离线", self)
             offline_action.setEnabled(False)
-            menu.addAction(offline_action)
+            self.context_menu.addAction(offline_action)
 
-        menu.addSeparator()
+        self.context_menu.addSeparator()
 
         # 其他选项...
         delete_action = QAction("删除好友", self)
-        delete_action.triggered.connect(lambda: self.delete_friend_requested.emit(username))
-        menu.addAction(delete_action)
+        delete_action.triggered.connect(lambda: self._delete_friend_with_menu(username))
+        self.context_menu.addAction(delete_action)
 
-        menu.exec(self.friend_list_widget.mapToGlobal(pos))
+        # 显示菜单
+        self.context_menu.exec(self.friend_list_widget.mapToGlobal(pos))
+
+    def _delete_friend_with_menu(self, username):
+        """处理删除好友并关闭菜单"""
+        # 关闭菜单
+        if hasattr(self, 'context_menu') and self.context_menu:
+            self.context_menu.close()
+            self.context_menu.deleteLater()
+            del self.context_menu
+
+        # 发送删除请求
+        self.delete_friend_requested.emit(username)
 
     def _on_friend_selected(self, current_item, previous_item):
         if not current_item:
@@ -925,6 +972,12 @@ class MainWindow(QMainWindow):
 
     def remove_friend(self, username):
         """从UI上移除一个好友。"""
+        # 确保关闭与该好友相关的任何菜单
+        if hasattr(self, 'context_menu') and self.context_menu:
+            self.context_menu.close()
+            self.context_menu.deleteLater()
+            del self.context_menu
+
         # 从好友列表移除
         for i in range(self.friend_list_widget.count()):
             item = self.friend_list_widget.item(i)

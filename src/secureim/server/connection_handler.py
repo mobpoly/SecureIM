@@ -1,6 +1,6 @@
 import json
-from .state import online_users
-from . import request_handler as handler
+from .state import online_users, ai_session_keys
+from . import request_handler as handler, server_crypto
 from . import database
 
 def send_to_client(client_socket, data):
@@ -70,6 +70,10 @@ def handle_client_connection(client_socket, address):
                     handler.handle_request_verification_code(payload, send_func)
                     continue
 
+                elif msg_type == "change_password":
+                    handler.handle_change_password(payload, send_func)
+                    continue
+
                 # 3. 检查登录状态（现在登录请求已处理）
                 if not current_user:
                     send_func({"type": "response", "status": "error", "message": "未登录"})
@@ -104,18 +108,60 @@ def handle_client_connection(client_socket, address):
 
                 elif msg_type in ["relay_message", "relay_session_key"]:
                     to_user = payload.get('to')
-                    target_socket = online_users.get_socket(to_user)
-                    if target_socket:
-                        log_msg_type = "会话密钥" if msg_type == "relay_session_key" else "消息"
-                        print(f"[C/S 中继] 正在从中继 '{current_user}' 到 '{to_user}' 的{log_msg_type}。")
 
-                        relay_payload = {"from": current_user, **payload}
-                        del relay_payload['to']
-                        relay_type = "receive_message" if msg_type == "relay_message" else "receive_session_key"
-                        relay_message = {"type": relay_type, "payload": relay_payload}
-                        send_to_client(target_socket, relay_message)
+                    if to_user == "ai":
+                        # 处理发送给AI的消息
+                        from . import ai
+                        if msg_type == "relay_session_key":
+                            # 处理会话密钥
+                            encrypted_key = payload.get('key')
+                            if encrypted_key:
+                                # 使用AI私钥解密AES密钥
+                                aes_key = server_crypto.decrypt_with_ai_private_key(encrypted_key)
+                                if aes_key:
+                                    # 存储用户与AI的会话密钥
+                                    ai_session_keys.store_key(current_user, aes_key)
+                        elif msg_type == "relay_message":
+                            # 处理普通消息
+                            encrypted_message = payload.get('content')
+                            if encrypted_message:
+                                ai.handle_ai_message(current_user, encrypted_message,
+                                                     lambda data: send_to_client(client_socket, data))
+
                     else:
-                        send_func({"type": "response", "status": "error", "message": f"用户 '{to_user}' 不在线。"})
+                        target_socket = online_users.get_socket(to_user)
+                        if target_socket:
+                            log_msg_type = "会话密钥" if msg_type == "relay_session_key" else "消息"
+                            print(f"[C/S 中继] 正在从中继 '{current_user}' 到 '{to_user}' 的{log_msg_type}。")
+
+                            relay_payload = {"from": current_user, **payload}
+                            del relay_payload['to']
+                            relay_type = "receive_message" if msg_type == "relay_message" else "receive_session_key"
+                            relay_message = {"type": relay_type, "payload": relay_payload}
+                            send_to_client(target_socket, relay_message)
+                        else:
+                            send_func({"type": "response", "status": "error", "message": f"用户 '{to_user}' 不在线。"})
+
+                elif msg_type == "logout":
+                    if current_user:
+                        print(f"用户 '{current_user}' 请求退出登录")
+                        response = {"type": "logout_response", "status": "success"}
+                        send_func(response)
+
+                        # 广播用户离线状态
+                        status_message = handler.broadcast_status_update(current_user, "offline", send_func)
+                        for friend in database.get_friends(current_user):
+                            friend_socket = online_users.get_socket(friend)
+                            if friend_socket:
+                                send_to_client(friend_socket, status_message)
+
+                        # 清理用户状态
+                        online_users.remove_user(current_user)
+                        current_user = None
+
+
+
+
 
                 elif msg_type == "logout":
                     if current_user:

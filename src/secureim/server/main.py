@@ -1,5 +1,8 @@
+import os
 import socket
 import threading
+
+from src.secureim.server.database import DATA_DIR
 from . import database
 from .connection_handler import handle_client_connection
 
@@ -10,16 +13,20 @@ def start_server():
     """
     初始化并启动安全IM服务器。
     """
-    # 1. 初始化数据库
+    # 1. 确保数据目录存在
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR, exist_ok=True)
+
+    # 2. 初始化数据库
     database.create_tables()
     
-    # 2. 创建并绑定服务器套接字
+    # 3. 创建并绑定服务器套接字
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind((HOST, PORT))
     server_socket.listen(5)
     print(f"服务器正在监听 {HOST}:{PORT}")
 
-    # 3. 循环接受客户端连接
+    # 4. 循环接受客户端连接
     try:
         while True:
             client_socket, address = server_socket.accept()
