@@ -163,6 +163,24 @@ def handle_client_connection(client_socket, address):
 
 
 
+                elif msg_type == "logout":
+                    if current_user:
+                        print(f"用户 '{current_user}' 请求退出登录")
+                        response = {"type": "logout_response", "status": "success"}
+                        send_func(response)
+
+                        # 广播用户离线状态
+                        status_message = handler.broadcast_status_update(current_user, "offline", send_func)
+                        for friend in database.get_friends(current_user):
+                            friend_socket = online_users.get_socket(friend)
+                            if friend_socket:
+                                send_to_client(friend_socket, status_message)
+
+                        # 清理用户状态
+                        online_users.remove_user(current_user)
+                        current_user = None
+
+
             except json.JSONDecodeError:
                 print(f"从 {address} 收到无效的JSON")
             except Exception as e:

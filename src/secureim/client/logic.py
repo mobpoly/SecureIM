@@ -35,6 +35,7 @@ class ClientLogic(QObject):
     user_info_received_signal = pyqtSignal(dict)  # 新增信号：用户信息接收
     starred_friends_changed = pyqtSignal(dict)  # 新增信号：特别关注好友变化
     mode_sync_request_signal = pyqtSignal(str, str)
+
     change_password_success_signal = pyqtSignal()
     change_password_failed_signal = pyqtSignal(str)
 

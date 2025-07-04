@@ -75,7 +75,6 @@ class MainController:
         if self.login_window:
             self.login_window.show_error(f"密码修改失败: {message}")
 
-
     def _connect_main_window_signals(self):
         if self.main_window:
             self.main_window.message_sent.connect(self.logic.send_encrypted_message)
@@ -93,7 +92,7 @@ class MainController:
         if self.main_window:
             self.main_window.close()
             self.main_window = None
-
+            
         # 重新显示登录窗口
         self.login_window = LoginWindow()
         self._connect_login_window_signals()
